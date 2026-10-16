@@ -643,7 +643,7 @@ input {
   position: fixed;
   bottom: 20px;
   left: calc(50% + var(--sidebar-w) / 2);
-  z-index: 11;
+  z-index: 40; /* above the phone drawer */
   transform: translateX(-50%);
   padding: 9px 16px;
   border-radius: 10px;
@@ -941,6 +941,13 @@ mark {
 
   .item-title {
     font-size: 16px;
+  }
+}
+
+/* Touch screens have no hover, so the "only" shortcut must always be visible (it is tappable). */
+@media (hover: none) {
+  .only-btn {
+    opacity: 1;
   }
 }
 

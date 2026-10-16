@@ -24,15 +24,16 @@ _LEFTOVER_ENTITY = re.compile(r"&(?:#\d{1,7}|#x[0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});"
 # Real markup that survived a first decoding pass, i.e. double-escaped HTML ("&lt;p&gt;").
 # Only common content tags count, so a headline about "<script>" tags keeps its text.
 _ESCAPED_MARKUP = re.compile(
-    r"</?(?:p|div|span|a|em|strong|b|i|u|ul|ol|li|h[1-6]|br|hr|figure|img|blockquote|table|tr|td)"
-    r"(?:\s[^<>]{0,300})?/?>",
+    r"<!--|</?(?:p|div|span|a|em|strong|b|i|u|ul|ol|li|h[1-6]|br|hr|figure|img|blockquote|table|tbody|tr|td|th"
+    r"|section|article|aside|header|footer|main|nav|pre|dl|dt|dd)(?:\s[^<>]*)?/?>",
     re.IGNORECASE,
 )
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]?(?=\s)")
-# A period after these is not a sentence end: "U.S.", "J. Smith", "Gen. Smith", "Oct. 12".
+# A period after these is not a sentence end: "U.S.", "J. Smith", "Gen. Smith", "Oct. 12", "3 a.m.".
+# A lone capital counts only when it is not part of a name like "AT&T" or "APT X".
 _ABBREVIATION = re.compile(
-    r"(?:\b[A-Z]|\b(?:Mr|Mrs|Ms|Dr|Prof|St|Mt|Inc|Ltd|Co|Corp|Gen|Gov|Sen|Rep|Lt|Col|Sgt|Capt|No|vs|etc"
-    r"|approx|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec|e\.g|i\.e))\.$"
+    r"(?:(?<![&\w])(?<![A-Z]{2} )[A-Z]|\b(?:Mr|Mrs|Ms|Dr|Prof|St|Mt|Inc|Ltd|Co|Corp|Gen|Gov|Sen|Rep|Lt|Col|Sgt|Capt"
+    r"|Adm|Maj|Brig|Dept|Jr|Sr|No|vs|etc|approx|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec|e\.g|i\.e|a\.m|p\.m))\.$"
 )
 _TERMINAL = re.compile(r"[.!?…:;\"'”’)\]]$")
 
@@ -40,7 +41,8 @@ _TERMINAL = re.compile(r"[.!?…:;\"'”’)\]]$")
 JUNK_MAX_CHARS = 300
 _JUNK_PARAGRAPH = re.compile(
     r"^(?:"
-    r"sign up\b|subscribe (?:to|now|for|here|today)\b|click here\b|read more\b|continue reading\b|keep reading\b"
+    r"sign up (?:for|to|now|here|today)\b|subscribe (?:to|now|for|here|today)\b|click here (?:to|for)\b"
+    r"|read more\b|continue reading\b|keep reading\b"
     r"|the (?:post|article) .+ (?:appeared|was published) first on\b"
     r"|this (?:article|story|post) (?:was )?(?:originally|first) (?:appeared|published)\b"
     r"|\(c\)\s|©|copyright\s*(?:©|\(c\)|\d{4})|creative commons\b"
@@ -60,9 +62,15 @@ _INLINE_BOILERPLATE = [
     # Only as a trailing call to action: at the start or right after a sentence end, never mid-word
     # ("can spread more") or mid-sentence.
     re.compile(
-        r"(?:^|(?<=[.!?…\]»)]))\s*(?:Continue reading|Keep reading|Read more|Read the (?:full|rest of the|complete) "
+        r"(?:^|(?<=[.!?…\]»)])|(?<=[.!?…][\"'”’]))\s*(?:Continue reading|Keep reading|Read more|Read the (?:full|rest of the|complete) "
         r"(?:story|article|post|report|analysis)|Click here to read more)\b.{0,200}$",
         re.I | re.S,
+    ),
+    # A capitalised call to action closing an excerpt mid-sentence ("…the servers Read more").
+    # Case-sensitive, so ordinary prose such as "can spread more" is never touched.
+    re.compile(
+        r"\s*\[?\b(?:Continue reading|Keep reading|Read [Mm]ore|Read the (?:full|rest of the|complete) "
+        r"(?:story|article|post|report|analysis))\W*$"
     ),
     re.compile(r"\s*\(more…\)\s*$", re.I),
     re.compile(r"\s*Categories: .{0,200}?(?:Tags: .{0,300})?$", re.S),
@@ -82,11 +90,17 @@ _PUNCTUATED_ELLIPSIS = re.compile(r"([.!?])\s*…$")
 class _ParagraphExtractor(HTMLParser):
     """Collects text, starting a new paragraph at every block-level boundary."""
 
-    def __init__(self) -> None:
+    def __init__(self, skip_tags: frozenset[str] = SKIP_TAGS) -> None:
         super().__init__(convert_charrefs=True)
         self.paragraphs: list[str] = []
         self._buffer: list[str] = []
         self._skip_depth = 0
+        self._skip_tags = skip_tags
+        if not skip_tags:
+            # Treat <script>/<style> (and, on newer Pythons, <textarea>/<title>) as ordinary tags, not as
+            # raw-text containers, so text after a mentioned "<script>" is still parsed normally.
+            self.CDATA_CONTENT_ELEMENTS = ()
+            self.RCDATA_CONTENT_ELEMENTS = ()
 
     def _flush(self) -> None:
         text = collapse_whitespace("".join(self._buffer))
@@ -95,7 +109,7 @@ class _ParagraphExtractor(HTMLParser):
         self._buffer = []
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
-        if tag in SKIP_TAGS:
+        if tag in self._skip_tags:
             self._skip_depth += 1
         elif tag in BLOCK_TAGS:
             self._flush()
@@ -105,7 +119,7 @@ class _ParagraphExtractor(HTMLParser):
             self._flush()
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in SKIP_TAGS:
+        if tag in self._skip_tags:
             self._skip_depth = max(0, self._skip_depth - 1)
         elif tag in BLOCK_TAGS:
             self._flush()
@@ -123,8 +137,8 @@ def collapse_whitespace(text: str) -> str:
     return _WHITESPACE.sub(" ", text.replace(" ", " ")).strip()
 
 
-def _parse_paragraphs(value: str) -> list[str]:
-    parser = _ParagraphExtractor()
+def _parse_paragraphs(value: str, skip_tags: frozenset[str] = SKIP_TAGS) -> list[str]:
+    parser = _ParagraphExtractor(skip_tags)
     parser.feed(value)
     parser.close()
     # Some feeds double-escape entities (e.g. "&amp;#8217;"); decode the leftovers once more.
@@ -139,8 +153,12 @@ def html_to_paragraphs(value: object) -> list[str]:
         return [collapse_whitespace(value)]
     paragraphs = []
     for paragraph in _parse_paragraphs(value):
-        # Double-escaped HTML ("&lt;p&gt;") only becomes markup after the first pass.
-        paragraphs.extend(_parse_paragraphs(paragraph) if _ESCAPED_MARKUP.search(paragraph) else [paragraph])
+        # Double-escaped HTML ("&lt;p&gt;") only becomes markup after the first pass. Nothing is skipped
+        # on this pass, so prose that mentions "<script>" next to real markup keeps its words.
+        if _ESCAPED_MARKUP.search(paragraph):
+            paragraphs.extend(_parse_paragraphs(paragraph, frozenset()))
+        else:
+            paragraphs.append(paragraph)
     return [p for p in paragraphs if p]
 
 
@@ -149,8 +167,13 @@ def html_to_text(value: object) -> str:
     return " ".join(html_to_paragraphs(value))
 
 
-def clean_title(value: object, max_chars: int = 300) -> str:
-    return truncate(_TITLE_DATE_SUFFIX.sub("", html_to_text(value)), max_chars)
+def clean_title(value: object, max_chars: int = 300, plain: bool = False) -> str:
+    """plain=True for titles the feed marks as plain text: they are decoded already, not HTML."""
+    if plain and isinstance(value, str):
+        text = collapse_whitespace(_LEFTOVER_ENTITY.sub(lambda m: unescape(m.group(0)), value))
+    else:
+        text = html_to_text(value)
+    return truncate(_TITLE_DATE_SUFFIX.sub("", text), max_chars)
 
 
 def _is_heading(paragraph: str) -> bool:
@@ -189,8 +212,13 @@ def truncate(text: str, max_chars: int) -> str:
     window = text[: max_chars + 1]
     cut = 0
     for match in _SENTENCE_END.finditer(window):
-        if max_chars // 2 <= match.end() <= max_chars and not _ABBREVIATION.search(text[: match.start() + 1]):
-            cut = match.end()
+        if not max_chars // 2 <= match.end() <= max_chars:
+            continue
+        if _ABBREVIATION.search(text[: match.start() + 1]):
+            continue
+        if text[match.end():].lstrip()[:1].islower():
+            continue  # "…shortly after 3 a.m. local time": the sentence goes on
+        cut = match.end()
     if cut:
         return text[:cut].rstrip()
     space = window.rfind(" ", 0, max_chars)

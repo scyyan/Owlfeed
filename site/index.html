@@ -90,11 +90,9 @@
       </header>
 
       <div class="content">
-        <p class="stale-banner" id="stale-banner" role="alert" hidden></p>
+        <p class="stale-banner" id="stale-banner" role="status" hidden></p>
         <div class="active-filters" id="active-filters" hidden></div>
         <button class="new-pill" id="new-pill" type="button" hidden></button>
-        <div class="status" id="status" aria-hidden="true" hidden></div>
-        <div class="sr-only" id="announcer" role="status" aria-live="polite"></div>
         <div class="feed" id="feed" aria-busy="true">
           <p class="loading">Loading the latest intelligence…</p>
         </div>
@@ -102,5 +100,8 @@
       </div>
     </main>
   </div>
+  <!-- Outside <main>: the phone drawer makes <main> inert, which would silence these. -->
+  <div class="status" id="status" aria-hidden="true" hidden></div>
+  <div class="sr-only" id="announcer" role="status" aria-live="polite"></div>
 </body>
 </html>

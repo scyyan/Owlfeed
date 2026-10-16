@@ -229,11 +229,11 @@ def cmd_check(args: argparse.Namespace) -> int:
         for row in rows:
             entries = row.entries or []
             mark = "✅" if not row.error and entries else ("❌" if row.error else "⚠️")
-            name = row.source.name + ("" if row.source.enabled else " *(disabled)*")
+            name = _cell(row.source.name, 40) + ("" if row.source.enabled else " *(disabled)*")
             latest = entries[0].title if entries else (row.error or "no items")
             newest = _age(_newest(entries), now) if entries else ""
             lines.append(
-                f"| {mark} | {_cell(name, 40)} | {_cell(row.source.group, 30)} | {row.status or ''} | "
+                f"| {mark} | {name} | {_cell(row.source.group, 30)} | {row.status or ''} | "
                 f"{len(entries)} | {newest} | {_cell(latest)} |"
             )
         with open(args.summary_file, "a", encoding="utf-8") as handle:

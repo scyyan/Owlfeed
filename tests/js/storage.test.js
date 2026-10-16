@@ -78,13 +78,22 @@ test('prefs fall back to defaults when corrupted', () => {
   assert.deepEqual(store.watchlist(), []);
 });
 
-test('works in memory when storage is blocked', () => {
-  const store = createStorage(new BrokenBackend());
-  store.setWatchlist(['APT28']);
-  store.setRead(['x']);
-  assert.deepEqual(store.watchlist(), ['APT28']);
-  assert.ok(store.isRead('x'));
-  assert.equal(store.theme(), null);
+test('works in memory when storage is blocked or missing', () => {
+  for (const backend of [new BrokenBackend(), null]) {
+    const store = createStorage(backend);
+    store.updateWatchlist((terms) => [...terms, 'APT28']);
+    store.updateWatchlist((terms) => [...terms, 'Volt Typhoon']);
+    store.setRead(['x']);
+    store.setRead(['y']);
+    store.setSaved(SNAPSHOT);
+    store.setSaved({ ...SNAPSHOT, id: 'b2' });
+    store.invalidate(); // e.g. before a backup: memory-only values must survive
+    assert.deepEqual(store.watchlist(), ['APT28', 'Volt Typhoon']);
+    assert.ok(store.isRead('x') && store.isRead('y'));
+    assert.equal(store.savedItems().length, 2);
+    assert.equal(Object.keys(store.exportData().read).length, 2);
+    assert.equal(store.theme(), null);
+  }
 });
 
 test('export and import round trip merges without duplicates', () => {

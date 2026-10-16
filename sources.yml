@@ -3,14 +3,15 @@
 # Every source needs:
 #   id        unique, lowercase letters/digits/dashes (used in URLs and saved state; don't rename casually)
 #   name      shown on each item and in the sidebar
-#   feed      the RSS or Atom feed URL
+#   feed      the RSS or Atom feed URL (https only)
 #   site      the publication's homepage (used for links and relative URLs)
-#   category  sidebar category: Cyber or Geopolitics
-#   group     sidebar group inside the category
+#   category  sidebar category, one of settings.categories below
+#   group     sidebar group inside that category
 # Optional:
 #   enabled        false to keep a source listed but not fetched (default true)
 #   summary_from   auto (default), description, or content: which feed field to summarize
 #   exclude_title  list of regular expressions; matching headlines are skipped
+#   timezone       time zone for feed dates that carry none, e.g. Europe/Brussels (default UTC)
 #
 # After editing, the CI "Feed check" job tests every feed and reports problems in its summary.
 
@@ -18,6 +19,9 @@ settings:
   retention_days: 7          # how long items stay on the dashboard
   max_items_per_source: 50   # newest entries taken from each feed per refresh
   summary_max_chars: 320     # summaries are trimmed to about this many characters
+  categories:                # sidebar categories and their groups; every source must use one of these
+    Cyber: [Government & CERT, Threat research, Security news]
+    Geopolitics: [Analysis & investigations, World news]
 
 sources:
   # ── Cyber · Government & CERT ────────────────────────────────────────────

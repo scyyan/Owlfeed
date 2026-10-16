@@ -13,6 +13,11 @@ import yaml
 
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 SUMMARY_MODES = ("auto", "description", "content")
+# Used when sources.yml has no settings.categories: category -> its sidebar groups.
+DEFAULT_CATEGORIES = {
+    "Cyber": ("Government & CERT", "Threat research", "Security news"),
+    "Geopolitics": ("Analysis & investigations", "World news"),
+}
 
 
 class ConfigError(ValueError):
@@ -45,6 +50,7 @@ class Source:
 class Config:
     settings: Settings
     sources: tuple[Source, ...]
+    categories: tuple[tuple[str, tuple[str, ...]], ...] = tuple(DEFAULT_CATEGORIES.items())
 
     @property
     def enabled_sources(self) -> tuple[Source, ...]:
@@ -54,7 +60,10 @@ class Config:
 def is_http_url(value: object) -> bool:
     if not isinstance(value, str):
         return False
-    parsed = urlparse(value.strip())
+    try:
+        parsed = urlparse(value.strip())
+    except ValueError:  # e.g. "https://[broken-ipv6/"
+        return False
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
@@ -72,7 +81,22 @@ def _text_field(raw: dict, key: str, where: str) -> str:
     return value.strip()
 
 
-def _parse_source(raw: object, index: int) -> Source:
+def _parse_categories(raw: object) -> dict[str, tuple[str, ...]]:
+    if raw is None:
+        return dict(DEFAULT_CATEGORIES)
+    if not isinstance(raw, dict) or not raw:
+        raise ConfigError("settings.categories must map each category to a list of groups")
+    categories: dict[str, tuple[str, ...]] = {}
+    for name, groups in raw.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigError("settings.categories: category names must be text")
+        if not isinstance(groups, list) or not groups or not all(isinstance(g, str) and g.strip() for g in groups):
+            raise ConfigError(f"settings.categories.{name} must be a list of group names")
+        categories[name.strip()] = tuple(g.strip() for g in groups)
+    return categories
+
+
+def _parse_source(raw: object, index: int, categories: dict[str, tuple[str, ...]]) -> Source:
     where = f"sources[{index}]"
     if not isinstance(raw, dict):
         raise ConfigError(f"{where} must be a mapping")
@@ -83,6 +107,8 @@ def _parse_source(raw: object, index: int) -> Source:
     for key in ("feed", "site"):
         if not is_http_url(raw.get(key)):
             raise ConfigError(f"{where}: '{key}' must be an http(s) URL")
+    if not raw["feed"].strip().lower().startswith("https://"):
+        raise ConfigError(f"{where}: 'feed' must use https://")
     enabled = raw.get("enabled", True)
     if not isinstance(enabled, bool):
         raise ConfigError(f"{where}: 'enabled' must be true or false")
@@ -96,6 +122,11 @@ def _parse_source(raw: object, index: int) -> Source:
         compiled = tuple(re.compile(p, re.IGNORECASE) for p in patterns)
     except re.error as exc:
         raise ConfigError(f"{where}: invalid exclude_title pattern: {exc}") from exc
+    category, group = _text_field(raw, "category", where), _text_field(raw, "group", where)
+    if category not in categories:
+        raise ConfigError(f"{where}: category must be one of {', '.join(categories)} (got {category!r})")
+    if group not in categories[category]:
+        raise ConfigError(f"{where}: group for {category} must be one of {', '.join(categories[category])} (got {group!r})")
     zone_name = raw.get("timezone", "UTC")
     try:
         zone = ZoneInfo(zone_name) if isinstance(zone_name, str) else None
@@ -108,8 +139,8 @@ def _parse_source(raw: object, index: int) -> Source:
         name=_text_field(raw, "name", where),
         feed=raw["feed"].strip(),
         site=raw["site"].strip(),
-        category=_text_field(raw, "category", where),
-        group=_text_field(raw, "group", where),
+        category=category,
+        group=group,
         enabled=enabled,
         summary_from=summary_from,
         exclude_title=compiled,
@@ -128,16 +159,17 @@ def parse_config(data: object) -> Config:
         max_items_per_source=_int_setting(raw_settings, "max_items_per_source", 50, 1, 500),
         summary_max_chars=_int_setting(raw_settings, "summary_max_chars", 320, 80, 2000),
     )
+    categories = _parse_categories(raw_settings.get("categories"))
     raw_sources = data.get("sources")
     if not isinstance(raw_sources, list) or not raw_sources:
         raise ConfigError("sources must be a non-empty list")
-    sources = tuple(_parse_source(raw, i) for i, raw in enumerate(raw_sources))
+    sources = tuple(_parse_source(raw, i, categories) for i, raw in enumerate(raw_sources))
     seen: set[str] = set()
     for source in sources:
         if source.id in seen:
             raise ConfigError(f"duplicate source id '{source.id}'")
         seen.add(source.id)
-    return Config(settings=settings, sources=sources)
+    return Config(settings=settings, sources=sources, categories=tuple(categories.items()))
 
 
 def load_config(path: str | Path) -> Config:

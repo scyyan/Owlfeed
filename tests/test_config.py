@@ -38,6 +38,10 @@ def test_valid_config_with_defaults():
         (source(exclude_title=["("]), "invalid exclude_title"),
         (source(exclude_title="Deal"), "list of regular expressions"),
         (source(timezone="Mars/Olympus"), "time zone name"),
+        (source(category="cyber"), "category must be one of Cyber, Geopolitics (got 'cyber')"),
+        (source(group="News"), "group for Cyber must be one of"),
+        (source(feed="http://example.com/feed"), "'feed' must use https://"),
+        (source(feed="https://[broken-ipv6/feed"), "'feed' must be an http(s) URL"),
     ],
 )
 def test_invalid_sources(bad, message):
@@ -67,3 +71,13 @@ def test_missing_or_malformed_file(tmp_path):
     empty.write_text("", encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(empty)
+
+
+def test_custom_categories():
+    config = parse_config({
+        "settings": {"categories": {"Defense": ["Industry"]}},
+        "sources": [source(category="Defense", group="Industry")],
+    })
+    assert dict(config.categories) == {"Defense": ("Industry",)}
+    with pytest.raises(ConfigError, match="list of group names"):
+        parse_config({"settings": {"categories": {"Defense": "Industry"}}, "sources": [source()]})

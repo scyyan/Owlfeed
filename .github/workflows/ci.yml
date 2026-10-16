@@ -11,6 +11,8 @@ permissions:
 jobs:
   test:
     name: Tests
+    # A pull request from this repository is already tested by its push run; forks are tested here.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -25,10 +27,7 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - name: Install dependencies
-        # Separate installs: pip's hash-checking mode would demand hashes for the dev tools too.
-        run: |
-          pip install --require-hashes -r requirements.txt
-          pip install -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements.txt -r requirements-dev.txt
       - name: Python unit tests
         run: python -m pytest -q --ignore=tests/e2e
       - name: JavaScript unit tests

@@ -25,13 +25,13 @@ jobs:
     permissions:
       contents: read
       pages: read # configure-pages looks up the site's URL
+      actions: read # find this workflow's previous run and its saved feed
     steps:
       - uses: actions/checkout@v5
+      # No dependency cache here: caches can be written by other workflows on main.
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements.txt
       - name: Install dependencies (hash-pinned)
         run: pip install --require-hashes -r requirements.txt
       - name: Configure Pages
@@ -39,11 +39,18 @@ jobs:
         uses: actions/configure-pages@v5
       - name: Restore the saved copy of the feed
         # Only used if the live feed.json answers 404 (e.g. a Pages hiccup), so history survives.
-        uses: actions/cache/restore@v4
-        with:
-          path: .state/feed.json
-          key: owlfeed-feed-${{ github.run_id }}
-          restore-keys: owlfeed-feed-
+        # It comes from this workflow's own last successful run on main, which nothing else can write.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow refresh.yml --branch main \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -n "${run_id}" ]; then
+            gh run download "${run_id}" --repo "$GITHUB_REPOSITORY" --name feed-state --dir .state \
+              || echo "Run ${run_id} has no saved feed; continuing without one"
+          else
+            echo "No earlier successful refresh; continuing without a saved feed"
+          fi
       - name: Fetch feeds
         # The live feed.json is this run's memory of earlier items. If it cannot be read
         # (anything other than "not found"), the build stops and the current dashboard stays
@@ -56,10 +63,12 @@ jobs:
           --fallback-file .state/feed.json
       - name: Keep a copy for the next run
         run: mkdir -p .state && cp site/data/feed.json .state/feed.json
-      - uses: actions/cache/save@v4
+      - uses: actions/upload-artifact@v4
         with:
+          name: feed-state
           path: .state/feed.json
-          key: owlfeed-feed-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 3
+          if-no-files-found: error
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site

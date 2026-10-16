@@ -188,3 +188,31 @@ def test_truncate_does_not_cut_at_abbreviations():
     text = "Officials in the U.S. and allied governments said the campaign targeted defense contractors across several regions for months."
     result = truncate(text, 60)
     assert result.endswith("…") and "U.S." in result
+
+
+def test_trailing_call_to_action_mid_sentence_is_removed():
+    assert summary_text("Attackers backdoored dozens of exposed servers Read more") == "Attackers backdoored dozens of exposed servers"
+    assert summary_text("Officials confirmed the breach. [Read more...]") == "Officials confirmed the breach."
+    quoted = 'The minister said "we will respond." Continue reading'
+    assert summary_text(quoted) == 'The minister said "we will respond."'
+
+
+def test_sign_up_and_click_here_leads_are_kept_unless_they_are_calls_to_action():
+    lead = "Sign up fraud surged as criminals automated account creation at scale across retailers."
+    assert summary_text(f"<p>{lead}</p>") == lead
+    assert summary_text("<p>Click here to subscribe to our newsletter.</p><p>The real story starts here and is long enough.</p>") == (
+        "The real story starts here and is long enough."
+    )
+
+
+def test_truncate_handles_times_and_names():
+    text = "The explosion happened shortly after 3 a.m. local time near the port, officials said in a statement on Monday."
+    assert truncate(text, 60).endswith("…")
+    text = "The outage hit customers of AT&T. Engineers restored most services within several hours of the incident."
+    assert truncate(text, 60) == "The outage hit customers of AT&T."
+
+
+def test_double_escaped_html_with_block_tags_and_tag_mentions():
+    escaped = "&lt;section&gt;&lt;p&gt;The kit injects a &lt;script&gt; loader into checkout pages.&lt;/p&gt;&lt;/section&gt;"
+    # The re-parse keeps every word; only the (double-escaped) tag itself disappears.
+    assert summary_text(escaped) == "The kit injects a loader into checkout pages."

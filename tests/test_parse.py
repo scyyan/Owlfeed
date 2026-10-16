@@ -151,3 +151,39 @@ def test_undated_entries_come_after_dated_ones():
     first_undated = next(i for i, e in enumerate(entries) if e.published is None)
     assert all(e.published is None for e in entries[first_undated:])
     assert all(e.published is not None for e in entries[:first_undated])
+
+
+def test_plain_text_titles_keep_tag_mentions():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>T</title><link>https://t.example/</link>
+    <item><title>How &lt;script&gt; tags hide malware in ads</title><link>https://t.example/1</link>
+    <description>Researchers found injected loaders in ad networks across several regions.</description></item>
+    </channel></rss>"""
+    (entry,) = parse_feed(feed, make_source("t"), Settings(), NOW)
+    assert entry.title == "How <script> tags hide malware in ads"
+    assert entry.summary.startswith("Researchers found")
+
+
+def test_published_date_wins_over_a_zone_less_update():
+    feed = b"""<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>A</title>
+    <entry><title>Edited later</title><link href="https://a.example/1"/><id>x</id>
+    <published>2026-10-01T09:00:00Z</published><updated>2026-10-15T12:00:00</updated></entry></feed>"""
+    (entry,) = parse_feed(feed, make_source("a", timezone="Europe/Brussels"), Settings(), NOW)
+    assert entry.published == datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
+
+
+def test_named_zone_abbreviations():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>N</title><link>https://n.example/</link>
+    <item><title>CEST</title><link>https://n.example/1</link><pubDate>Mon, 12 Oct 2026 21:44:00 CEST</pubDate></item>
+    <item><title>Fractional</title><link>https://n.example/2</link><pubDate>2026-10-12T21:44:00.000</pubDate></item>
+    </channel></rss>"""
+    found = by_title(parse_feed(feed, make_source("n", timezone="Europe/Brussels"), Settings(), NOW))
+    assert found["CEST"].published == datetime(2026, 10, 12, 19, 44, tzinfo=timezone.utc)
+    assert found["Fractional"].published == datetime(2026, 10, 12, 19, 44, tzinfo=timezone.utc)
+
+
+def test_broken_channel_link_falls_back_to_the_site():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>B</title><link>https://[site-url]/</link>
+    <item><title>Relative</title><link>/news/1</link></item></channel></rss>"""
+    source = make_source("b", site="https://b.example/")
+    (entry,) = parse_feed(feed, source, Settings(), NOW)
+    assert entry.url == "https://b.example/news/1"

@@ -52,9 +52,9 @@ when something changed), timeouts, and one retry. Each download is capped at 10 
 rest. If one source fails, its earlier items stay on the dashboard and its dot turns orange.
 If every source fails at once, nothing is published and the current dashboard stays up.
 
-The refresh also keeps a copy of the feed in GitHub's Actions cache. It's only used if the
-live `feed.json` ever answers "not found", so a GitHub Pages hiccup can't wipe the
-7-day history.
+Each refresh also saves a copy of the feed with its run, and the next refresh picks it up from
+the last successful one. That copy is only used if the live `feed.json` ever answers "not
+found", so a GitHub Pages hiccup can't wipe the 7-day history.
 
 ## One-time setup
 
@@ -99,8 +99,8 @@ source looks like this:
     name: Bellingcat                     # shown on every item
     feed: https://www.bellingcat.com/feed/
     site: https://www.bellingcat.com/
-    category: Geopolitics                # Cyber or Geopolitics
-    group: Analysis & investigations     # sidebar group
+    category: Geopolitics                # one of settings.categories at the top of the file
+    group: Analysis & investigations     # one of that category's groups
 ```
 
 Optional settings:
@@ -110,11 +110,14 @@ Optional settings:
 - `summary_from: content` summarizes the article body instead of the feed's teaser.
 - `timezone: Europe/Brussels` is for feeds whose dates carry no time zone.
 
+Feed URLs must use `https://`. To add a category or group (say, *Defense*), list it under
+`settings.categories` at the top of `sources.yml` first.
+
 Every push runs the **CI** workflow. Its *Feed check* job downloads every feed from GitHub's
 network and posts a table of what works in the run's summary. Check it after adding a
-source. If `sources.yml` has a mistake (a missing field, a duplicate id, broken YAML), the
-refresh stops before publishing and the dashboard keeps its last data. The CI run for that
-push shows exactly what's wrong.
+source. If `sources.yml` has a mistake (a missing field, a duplicate id, a category that isn't
+listed, an `http://` feed, broken YAML), the refresh stops before publishing and the dashboard
+keeps its last data. The CI run for that push shows exactly what's wrong.
 
 ## Troubleshooting
 
@@ -125,6 +128,9 @@ push shows exactly what's wrong.
 - **A source has an orange dot.** Hover over it to see the error. Sites sometimes move their
   feeds or block automated requests. Find the new feed URL, update `sources.yml`, and
   confirm it in the CI *Feed check* summary.
+- **GitHub's "There isn't a GitHub Pages site here" page.** The first refresh hasn't finished
+  or it failed. Check that *Settings → Pages → Source* is **GitHub Actions**, then open the
+  *Refresh feed* run in the *Actions* tab.
 - **"No feed data published yet"** when you open `site/index.html` yourself. The page needs
   `site/data/feed.json`; run `python -m owlfeed build` first (see Development).
 
@@ -132,8 +138,7 @@ push shows exactly what's wrong.
 
 ```sh
 python -m venv .venv && . .venv/bin/activate
-pip install --require-hashes -r requirements.txt   # runtime packages, pinned with hashes
-pip install -r requirements-dev.txt                 # test tools
+pip install --require-hashes -r requirements.txt -r requirements-dev.txt   # pinned with hashes
 
 python -m owlfeed build                 # fetch every feed into site/data/feed.json
 python -m owlfeed check --samples 3     # health report for every source
@@ -151,5 +156,6 @@ Layout:
 - `site/`: the dashboard (plain HTML, CSS and ES modules; no build step).
 - `tests/`: pytest suites, sample feeds, Node unit tests and Playwright browser tests.
 - `.github/workflows/`: CI, the 15-minute refresh and deploy, and the keepalive.
-- `requirements.in`: direct runtime dependencies. `requirements.txt` is generated from it with
-  `pip-compile --generate-hashes --strip-extras requirements.in` (from `pip-tools`).
+- `requirements.in` and `requirements-dev.in`: direct dependencies. The `.txt` files are
+  generated from them with `pip-compile --generate-hashes --strip-extras <file>.in`
+  (from `pip-tools`).

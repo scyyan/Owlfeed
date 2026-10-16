@@ -183,15 +183,36 @@ def test_write_and_load_previous_file(tmp_path):
 
 
 def test_expired_undated_items_do_not_come_back_as_new():
-    first = merge(None, CONFIG, {"alpha": ok(entry("nodate", published=None)), "bravo": ok()}, NOW)
+    nodate = entry("nodate", published=None)
+    first = merge(None, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, NOW)
     week_later = NOW + timedelta(days=8)
-    second = merge(first, CONFIG, {"alpha": ok(entry("nodate", published=None)), "bravo": ok()}, week_later)
-    assert ids(second) == [] and second["expired"] == {"id-nodate": "alpha"}
-    third = merge(second, CONFIG, {"alpha": ok(entry("nodate", published=None)), "bravo": ok()}, week_later + timedelta(minutes=15))
-    assert ids(third) == [] and "id-nodate" in third["expired"]
-    # Once the feed stops listing it, the tombstone is dropped.
-    fourth = merge(third, CONFIG, {"alpha": ok(), "bravo": ok()}, week_later + timedelta(minutes=30))
-    assert fourth["expired"] == {}
+    second = merge(first, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, week_later)
+    assert ids(second) == [] and second["expired"] == {"id-nodate": {"source": "alpha", "since": iso(week_later)}}
+    # A short or empty response does not erase the tombstone...
+    glitch = merge(second, CONFIG, {"alpha": ok(), "bravo": ok()}, week_later + timedelta(minutes=15))
+    assert "id-nodate" in glitch["expired"]
+    third = merge(glitch, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, week_later + timedelta(minutes=30))
+    assert ids(third) == []
+    # ...but it lapses after 30 days once the feed no longer lists the item.
+    later = merge(third, CONFIG, {"alpha": ok(), "bravo": ok()}, week_later + timedelta(days=31))
+    assert later["expired"] == {}
+    # While the feed keeps listing it, the tombstone stays even after 30 days.
+    still_listed = merge(third, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, week_later + timedelta(days=31))
+    assert ids(still_listed) == [] and "id-nodate" in still_listed["expired"]
+
+
+def test_malformed_tombstones_and_future_items_are_ignored():
+    previous = {
+        "version": 1,
+        "sources": [],
+        "expired": {"x": "alpha", "y": {"source": "alpha"}, "z": ["not", "a", "dict"], 5: {}},
+        "items": [
+            {"id": "f", "source": "alpha", "title": "From the future", "url": "https://evil.example/f",
+             "published": "2099-01-01T00:00:00Z", "first_seen": "2099-01-01T00:00:00Z"},
+        ],
+    }
+    state = merge(previous, CONFIG, {"alpha": ok(), "bravo": ok()}, NOW)
+    assert state["items"] == [] and state["expired"] == {}
 
 
 def test_written_feed_is_world_readable(tmp_path):

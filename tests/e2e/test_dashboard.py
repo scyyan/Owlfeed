@@ -389,3 +389,44 @@ def test_stale_banner_shows_on_phones(make_page, server):
     open_dashboard(page, server)
     expect(page.locator("#stale-banner")).to_be_visible()
     expect(page.locator("#stale-banner")).to_contain_text("last updated 3 hours ago")
+
+
+def test_restore_from_the_phone_drawer_is_announced(make_page, server, tmp_path):
+    backup = tmp_path / "backup.json"
+    backup.write_text('{"app": "owlfeed", "version": 1, "watchlist": ["Examplia"]}', encoding="utf-8")
+    page = make_page(viewport=(390, 844))
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    page.get_by_role("button", name="Open views and filters").click()
+    with page.expect_file_chooser() as chooser:
+        page.get_by_role("button", name="Restore").click()
+    chooser.value.set_files(str(backup))
+    expect(page.locator("#announcer")).to_contain_text("1 watchlist terms added")
+    assert page.evaluate("document.getElementById('announcer').closest('[inert]')") is None
+    expect(page.locator("#status")).to_be_visible()
+
+
+def test_stale_banner_text_is_stable_between_ticks(make_page, server):
+    server.write_feed(build_feed(generated_at=NOW - timedelta(hours=3)))
+    page = make_page()
+    page.clock.install(time=NOW)
+    open_dashboard(page, server)
+    page.evaluate(
+        "window.__bannerChanges = 0;"
+        "new MutationObserver(() => window.__bannerChanges++)"
+        ".observe(document.getElementById('stale-banner'), {childList: true, characterData: true, subtree: true})"
+    )
+    page.clock.run_for(5 * 30_000)  # five ticks within the same hour
+    assert page.evaluate("window.__bannerChanges") == 0
+
+
+def test_clearing_search_with_escape_returns_to_the_newest_items(make_page, server):
+    page = make_page(viewport=(1280, 500))
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    page.get_by_role("searchbox").fill("sample")
+    expect(page.locator("#active-filters")).to_contain_text("“sample”")
+    page.evaluate("window.scrollTo(0, 900)")
+    page.get_by_role("searchbox").press("Escape")
+    wait_until(page, "window.scrollY === 0")
+    expect(page.locator("article.item")).to_have_count(len(ITEMS))

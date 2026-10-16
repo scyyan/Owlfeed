@@ -20,6 +20,10 @@ from .parse import Entry
 
 SCHEMA_VERSION = 1
 MAX_ITEMS = 6000
+# Expired undated items are remembered this long (or for as long as their feed still lists them).
+TOMBSTONE_DAYS = 30
+# Restored items dated later than this are corrupt (or injected) and are dropped.
+FUTURE_TOLERANCE = timedelta(minutes=10)
 
 log = logging.getLogger(__name__)
 
@@ -96,7 +100,7 @@ def load_previous_file(path: str | Path) -> dict | None:
     return validate_previous(data)
 
 
-def _clean_previous_item(item: object) -> dict | None:
+def _clean_previous_item(item: object, now: datetime) -> dict | None:
     """Normalize an item from the previous feed, or drop it if it is malformed."""
     if not isinstance(item, dict):
         return None
@@ -105,6 +109,8 @@ def _clean_previous_item(item: object) -> dict | None:
     if not all(isinstance(f, str) and f for f in fields) or not is_http_url(item.get("url")):
         return None
     if published is None or first_seen is None:
+        return None
+    if max(published, first_seen) > now + FUTURE_TOLERANCE:
         return None
     return {
         "id": item["id"],
@@ -136,16 +142,22 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
     enabled_ids = {s.id for s in sources}
     now_iso = iso(now)
 
-    # Undated items that aged out, kept as {id: source} while their feed still lists them, so they
-    # are not re-created as brand-new items on the next run.
+    # Undated items that aged out ("tombstones"), so they are not re-created as brand-new items:
+    # {id: {"source": id, "since": iso}}. Malformed entries are ignored.
     raw_expired = (previous or {}).get("expired")
-    expired_before = {
-        k: v for k, v in (raw_expired.items() if isinstance(raw_expired, dict) else []) if isinstance(k, str) and v in enabled_ids
-    }
+    expired_before: dict[str, dict] = {}
+    for item_id, mark in (raw_expired.items() if isinstance(raw_expired, dict) else []):
+        if (
+            isinstance(item_id, str)
+            and isinstance(mark, dict)
+            and mark.get("source") in enabled_ids
+            and parse_iso(mark.get("since")) is not None
+        ):
+            expired_before[item_id] = {"source": mark["source"], "since": mark["since"]}
 
     merged: dict[str, dict] = {}
     for raw in (previous or {}).get("items", []):
-        item = _clean_previous_item(raw)
+        item = _clean_previous_item(raw, now)
         if item and item["source"] in enabled_ids and item["id"] not in merged:
             merged[item["id"]] = item
 
@@ -157,7 +169,8 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
             existing = merged.get(entry.id)
             if existing and existing["source"] != source.id:
                 continue  # the same article is already listed under another source
-            if not existing and entry.published is None and expired_before.get(entry.id) == source.id:
+            tombstone = expired_before.get(entry.id)
+            if not existing and entry.published is None and tombstone and tombstone["source"] == source.id:
                 continue  # an undated item that already had its 7 days
             first_seen = existing["first_seen"] if existing else now_iso
             if entry.published is not None:
@@ -185,13 +198,16 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
         for source_id, outcome in outcomes.items()
         if outcome is not None and outcome.entries is not None
     }
-    expired: dict[str, str] = {}
-    for item_id, source_id in expired_before.items():
-        if source_id not in fresh_ids or item_id in fresh_ids[source_id]:
-            expired[item_id] = source_id  # still listed (or not re-checked this run)
+    tombstone_cutoff = iso(now - timedelta(days=TOMBSTONE_DAYS))
+    expired: dict[str, dict] = {}
+    for item_id, mark in expired_before.items():
+        # Kept while recent, or while the feed still lists the item; one short or empty response
+        # from a source therefore cannot bring its old undated items back as "new".
+        if mark["since"] >= tombstone_cutoff or item_id in fresh_ids.get(mark["source"], ()):
+            expired[item_id] = mark
     for item in merged.values():
-        if item["published"] < cutoff and item["date_estimated"]:
-            expired[item["id"]] = item["source"]
+        if item["published"] < cutoff and item["date_estimated"] and item["id"] not in expired:
+            expired[item["id"]] = {"source": item["source"], "since": now_iso}
     items.sort(key=lambda item: item["title"].casefold())
     items.sort(key=lambda item: (item["published"], item["first_seen"]), reverse=True)
     items = items[:MAX_ITEMS]

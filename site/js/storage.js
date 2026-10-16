@@ -57,10 +57,14 @@ function cleanSnapshot(value) {
 
 export function createStorage(backend = defaultBackend()) {
   const memory = new Map();
+  // Keys whose latest value only exists in memory because storage refused it (blocked or full).
+  // Memory is the source of truth for them, so later changes build on it instead of starting over.
+  const memoryOnly = new Set();
 
   function readBackend(key, fallback) {
+    if (!backend || memoryOnly.has(key)) return memory.has(key) ? memory.get(key) : fallback;
     try {
-      const raw = backend?.getItem(PREFIX + key);
+      const raw = backend.getItem(PREFIX + key);
       return raw == null ? fallback : JSON.parse(raw);
     } catch {
       return memory.has(key) ? memory.get(key) : fallback;
@@ -74,10 +78,15 @@ export function createStorage(backend = defaultBackend()) {
 
   function save(key, value) {
     memory.set(key, value);
+    if (!backend) {
+      memoryOnly.add(key);
+      return;
+    }
     try {
-      backend?.setItem(PREFIX + key, JSON.stringify(value));
+      backend.setItem(PREFIX + key, JSON.stringify(value));
+      memoryOnly.delete(key);
     } catch {
-      // Storage full or blocked: keep working from memory for this visit.
+      memoryOnly.add(key); // storage full or blocked: keep working from memory for this visit
     }
   }
 
@@ -94,8 +103,8 @@ export function createStorage(backend = defaultBackend()) {
   return {
     /** Forget cached values (all, or one key) so the next read comes from storage. */
     invalidate(key) {
-      if (key == null) memory.clear();
-      else memory.delete(key);
+      const keys = key == null ? [...memory.keys()] : [key];
+      for (const k of keys) if (!memoryOnly.has(k)) memory.delete(k);
     },
 
     /** Call onChange(key) when another tab changes a stored value. Returns an unsubscribe function. */

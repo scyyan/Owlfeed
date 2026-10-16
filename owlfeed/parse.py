@@ -21,12 +21,15 @@ FALLBACK_DATE_FORMATS = (
     "%a, %d %b %Y %H:%M:%S",  # RFC 822 without a zone, which feedparser rejects
     "%a, %d %b %Y %H:%M",
     "%d %b %Y %H:%M:%S",
+    "%d %b %Y %H:%M",
+    "%Y-%m-%dT%H:%M:%S.%f",
     "%Y-%m-%dT%H:%M:%S",
     "%Y-%m-%dT%H:%M",
-    "%A, %B %d, %Y - %H:%M",
-    "%B %d, %Y - %H:%M",
+    "%Y-%m-%d %H:%M:%S.%f",
     "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d %H:%M",
+    "%A, %B %d, %Y - %H:%M",
+    "%B %d, %Y - %H:%M",
     "%Y-%m-%d",
     "%A, %d %B %Y",
     "%d %B %Y",
@@ -34,6 +37,15 @@ FALLBACK_DATE_FORMATS = (
 )
 # A date string that names its own offset or zone; the source's configured zone does not apply.
 _HAS_ZONE = re.compile(r"(?:\d\s*(?:Z|[+-]\d{2}:?\d{2})|\b(?:GMT|UTC|UT|[ECMP][SD]T|Z)\b)\s*$", re.IGNORECASE)
+# Zone abbreviations feedparser does not know (it would silently read them as UTC).
+NAMED_ZONES = {
+    name: timezone(timedelta(hours=hours), name)
+    for name, hours in {
+        "WET": 0, "WEST": 1, "BST": 1, "CET": 1, "CEST": 2, "EET": 2, "EEST": 3, "MSK": 3,
+        "SGT": 8, "HKT": 8, "JST": 9, "KST": 9, "AEST": 10, "AEDT": 11, "NZST": 12, "NZDT": 13,
+    }.items()
+}
+_NAMED_ZONE = re.compile(r"\s(" + "|".join(NAMED_ZONES) + r")\s*$")
 TRACKING_PARAMS = frozenset(
     {
         "fbclid", "gclid", "dclid", "yclid", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "mkt_tok",
@@ -93,13 +105,19 @@ def entry_link(entry: dict, base: str) -> str | None:
     """The original article URL. feedburner:origLink beats redirector links."""
     for candidate in (entry.get("feedburner_origlink"), entry.get("link"), _alternate_link(entry)):
         if isinstance(candidate, str) and candidate.strip():
-            url = urljoin(base, candidate.strip())
-            if is_http_url(url):
-                return clean_link(url)
+            try:
+                url = urljoin(base, candidate.strip())
+                if is_http_url(url):
+                    return clean_link(url)
+            except ValueError:
+                continue  # malformed (e.g. a broken IPv6 host); try the next candidate
     # A guid is only a link when it is already an absolute URL; never resolve opaque ids.
     guid = entry.get("id")
     if isinstance(guid, str) and is_http_url(guid):
-        return clean_link(guid.strip())
+        try:
+            return clean_link(guid.strip())
+        except ValueError:
+            return None
     return None
 
 
@@ -115,33 +133,31 @@ def parse_loose_date(text: str, tz: tzinfo = timezone.utc) -> datetime | None:
             moment = datetime.strptime(text, fmt)
         except ValueError:
             continue
-        return moment.replace(tzinfo=tz).astimezone(timezone.utc)
+        return moment.replace(tzinfo=tz, microsecond=0).astimezone(timezone.utc)
     return None
 
 
+def _from_struct(value: object) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(calendar.timegm(value), tz=timezone.utc).replace(microsecond=0)
+    except (OverflowError, TypeError, ValueError):
+        return None
+
+
 def entry_published(entry: dict, now: datetime, tz: tzinfo = timezone.utc) -> datetime | None:
-    # feedparser silently treats zone-less dates as UTC; read those in the source's own zone first.
+    """Publication time: published, else updated, else created (never a later field over an earlier one)."""
     for key in ("published", "updated", "created"):
-        raw = dict.get(entry, key)
-        if isinstance(raw, str) and raw.strip() and not _HAS_ZONE.search(raw.strip()):
-            moment = parse_loose_date(raw, tz)
-            if moment and _plausible(moment, now):
-                return moment
-    for key in ("published_parsed", "updated_parsed", "created_parsed"):
-        # dict.get skips feedparser's deprecated updated->published aliasing (and its warning).
-        value = dict.get(entry, key)
-        if not value:
-            continue
-        try:
-            moment = datetime.fromtimestamp(calendar.timegm(value), tz=timezone.utc)
-        except (OverflowError, TypeError, ValueError):
-            continue
-        if _plausible(moment, now):
-            return moment.replace(microsecond=0)
-    for key in ("published", "updated", "created"):
-        raw = dict.get(entry, key)
-        if isinstance(raw, str) and not dict.get(entry, f"{key}_parsed"):
-            moment = parse_loose_date(raw, tz)
+        raw = dict.get(entry, key)  # dict.get skips feedparser's deprecated updated->published aliasing
+        raw = raw.strip() if isinstance(raw, str) else ""
+        readings = []
+        named = _NAMED_ZONE.search(raw)
+        if named:
+            readings.append(parse_loose_date(raw[: named.start()], NAMED_ZONES[named.group(1)]))
+        elif raw and not _HAS_ZONE.search(raw):
+            # feedparser would read a zone-less date as UTC; use the source's own zone instead.
+            readings.append(parse_loose_date(raw, tz))
+        readings.append(_from_struct(dict.get(entry, f"{key}_parsed")))
+        for moment in readings:
             if moment and _plausible(moment, now):
                 return moment
     return None
@@ -151,7 +167,9 @@ def _entry(raw: dict, base: str, source: Source, settings: Settings, now: dateti
     url = entry_link(raw, base)
     if not url:
         return None
-    title = clean_title(raw.get("title"))
+    # A plain-text title is already decoded; parsing it as HTML would eat "<script>" mentions.
+    plain = (raw.get("title_detail") or {}).get("type") == "text/plain"
+    title = clean_title(raw.get("title"), plain=plain)
     if title and any(pattern.search(title) for pattern in source.exclude_title):
         return None
     summary = make_summary(raw, source.summary_from, title, settings.summary_max_chars)
@@ -181,6 +199,10 @@ def parse_feed(
         return []
 
     base = parsed.feed.get("link") or source.site
+    try:
+        urlsplit(base)
+    except ValueError:
+        base = source.site  # a broken channel <link> must not discard every entry
     entries: list[Entry] = []
     seen: set[str] = set()
     for raw in parsed.entries:

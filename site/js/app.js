@@ -193,13 +193,13 @@ async function loadInitial() {
     const firstRun = error.status === 404;
     const offline = navigator.onLine === false;
     let detail;
-    if (firstRun) detail = 'The first refresh publishes it within about 15 minutes. This page will retry automatically.';
+    if (firstRun) detail = 'There is no data/feed.json yet: wait for the first refresh, or run “python -m owlfeed build” when working locally. This page retries automatically.';
     else if (offline) detail = "You appear to be offline. This page will retry when it can.";
     else detail = `The latest feed couldn't be loaded (${error.message}). Retrying in a minute.`;
     $('feed').replaceChildren(
       ui.emptyState(firstRun ? 'No feed data published yet' : "Couldn't load the feed", detail),
     );
-    $('updated').textContent = firstRun ? 'Waiting for first refresh' : offline ? 'Offline' : 'Update failed';
+    $('updated').textContent = firstRun ? 'No data yet' : offline ? 'Offline' : 'Update failed';
     state.retryTimer = setTimeout(loadInitial, 60_000);
   }
 }
@@ -305,12 +305,20 @@ function feedFocusKey() {
   return { id: article.dataset.id, action: active.dataset.action ?? null };
 }
 
+function focusFirstItem() {
+  $('feed').querySelector('.item-title a')?.focus({ preventScroll: true });
+}
+
 function restoreFeedFocus(key) {
   if (!key) return;
   const article = articleFor(key.id);
+  if (!article) {
+    focusFirstItem(); // the focused item is gone (filtered out or expired)
+    return;
+  }
   const target = key.action
-    ? article?.querySelector(`[data-action="${key.action}"]`)
-    : article?.querySelector('.item-title a');
+    ? article.querySelector(`[data-action="${key.action}"]`)
+    : article.querySelector('.item-title a');
   target?.focus({ preventScroll: true });
 }
 
@@ -450,9 +458,10 @@ function renderHeader() {
       : `Feed refreshed ${new Date(fresh.generated).toLocaleString()}`;
     const banner = $('stale-banner');
     banner.hidden = !fresh.stale;
-    if (fresh.stale) {
-      banner.textContent = `This feed was last ${fresh.label.toLowerCase()}. The scheduled refresh may be paused; check the Actions tab of the Owlfeed repository.`;
-    }
+    const message = fresh.stale
+      ? `This feed was last ${fresh.label.toLowerCase()}. The scheduled refresh may be paused; check the Actions tab of the Owlfeed repository.`
+      : '';
+    if (banner.textContent !== message) banner.textContent = message; // a live region: only real changes
   }
   const newCount = state.data ? filterItems(state.items, filterContext('new', [])).length : 0;
   const chip = $('new-chip');
@@ -511,6 +520,7 @@ function resetFilters() {
   state.tokens = [];
   $('search').value = '';
   filtersChanged();
+  $('search').focus({ preventScroll: true }); // the Clear button that had focus is gone
 }
 
 function articleFor(id) {
@@ -669,6 +679,7 @@ function changeWatchlist(change) {
   state.terms = storage.updateWatchlist(change);
   recomputeWatch();
   renderAll();
+  if (state.prefs.view === 'watchlist') scrollToFeedTop();
 }
 
 function wireEvents() {
@@ -704,6 +715,7 @@ function wireEvents() {
   $('sources-reset').addEventListener('click', () => {
     state.prefs.hiddenSources = [];
     filtersChanged();
+    $('source-list').querySelector('[data-source]')?.focus(); // "Show all" hides itself
   });
 
   let searchTimer = null;
@@ -761,7 +773,10 @@ function wireEvents() {
   });
   $('mark-all-read').addEventListener('click', markAllRead);
   $('theme-btn').addEventListener('click', toggleTheme);
-  $('new-pill').addEventListener('click', applyPending);
+  $('new-pill').addEventListener('click', () => {
+    applyPending();
+    focusFirstItem(); // the pill hides itself; continue from the newest item
+  });
   $('menu-btn').addEventListener('click', openDrawer);
   $('sidebar-close').addEventListener('click', () => closeDrawer());
   $('scrim').addEventListener('click', () => closeDrawer());
@@ -789,6 +804,7 @@ function wireEvents() {
         state.query = '';
         state.tokens = [];
         renderFeed();
+        scrollToFeedTop();
       }
     }
   });
@@ -847,7 +863,10 @@ function tick() {
     renderHeader();
     const fresh = freshness(now);
     const label = $('source-health').querySelector('.health-updated');
-    if (label && fresh) label.textContent = fresh.label;
+    if (label && fresh) {
+      label.textContent = fresh.label;
+      label.classList.toggle('is-stale', fresh.stale);
+    }
   }
   if (document.visibilityState === 'visible' && now - state.lastFetch >= POLL_MS) poll();
 }
