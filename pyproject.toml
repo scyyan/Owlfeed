@@ -1,0 +1,9 @@
+[project]
+name = "owlfeed"
+version = "1.0.0"
+description = "OSINT news dashboard: fetches trusted feeds and publishes them to GitHub Pages"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

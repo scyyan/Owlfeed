@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:feedburner="http://rssnamespace.org/feedburner/ext/1.0">
+<channel>
+  <title>Example News</title>
+  <link>https://news.example.com/</link>
+  <description>Sample feed with awkward items</description>
+
+  <item>
+    <title>No publication date</title>
+    <link>https://news.example.com/no-date</link>
+    <description>This item has no date at all, so Owlfeed should fall back to when it first saw it.</description>
+  </item>
+
+  <item>
+    <title>Dated far in the future</title>
+    <link>https://news.example.com/future</link>
+    <pubDate>Fri, 01 Jan 2027 00:00:00 +0000</pubDate>
+    <description>A timezone bug or scheduled post gave this item a date that has not happened yet.</description>
+  </item>
+
+  <item>
+    <title>Script link</title>
+    <link>javascript:alert(1)</link>
+    <guid isPermaLink="false">not-a-url</guid>
+    <description>Items without a usable http(s) link must be skipped entirely.</description>
+  </item>
+
+  <item>
+    <title>No publication date (duplicate)</title>
+    <link>https://news.example.com/no-date#comments</link>
+    <description>Same article as the first item, linked with a fragment.</description>
+  </item>
+
+  <item>
+    <title>Very long description</title>
+    <link>https://news.example.com/long</link>
+    <pubDate>Wed, 15 Oct 2026 12:30:00 GMT</pubDate>
+    <description>Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua Ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur Excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium totam rem aperiam eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo</description>
+  </item>
+
+  <item>
+    <link>https://news.example.com/untitled</link>
+    <pubDate>Wed, 15 Oct 2026 12:20:00 GMT</pubDate>
+    <description>An untitled item still gets a headline built from the start of its summary text.</description>
+  </item>
+
+  <item>
+    <title>Sponsored: Join our webinar on cloud security</title>
+    <link>https://news.example.com/webinar</link>
+    <pubDate>Wed, 15 Oct 2026 12:10:00 GMT</pubDate>
+    <description>Promotional item that a source can filter out with exclude_title.</description>
+  </item>
+
+  <item>
+    <title>Feedburner original link</title>
+    <link>https://feeds.example.com/~r/ExampleNews/~3/abc123/</link>
+    <feedburner:origLink>https://news.example.com/2026/10/original-article.html</feedburner:origLink>
+    <pubDate>Wed, 15 Oct 2026 12:00:00 GMT</pubDate>
+    <description>Redirector links should be replaced with the original article URL.</description>
+  </item>
+
+  <item>
+    <title>Talks to resume next week</title>
+    <link>https://news.example.com/world/talks</link>
+    <pubDate>Wed, 15 Oct 2026 11:50:00 GMT</pubDate>
+    <description><![CDATA[<p>Officials say the talks will resume next week after a brief pause in negotiations.</p> <a href="https://news.example.com/world/talks">Continue reading...</a>]]></description>
+  </item>
+
+  <item>
+    <title><![CDATA[<b>Bold</b> &amp; brave]]></title>
+    <link>https://news.example.com/bold</link>
+    <pubDate>Wed, 15 Oct 2026 11:40:00 GMT</pubDate>
+    <description><![CDATA[<b>Bold</b> &amp; brave]]></description>
+  </item>
+
+  <item>
+    <title>Relative link</title>
+    <link>/news/relative-link</link>
+    <pubDate>Wed, 15 Oct 2026 11:30:00 GMT</pubDate>
+    <description><![CDATA[<script>alert("x")</script><style>p{}</style>Script and style blocks never leak into summaries, only the readable text does.]]></description>
+  </item>
+</channel>
+</rss>

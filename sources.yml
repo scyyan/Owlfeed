@@ -1,0 +1,337 @@
+# Owlfeed sources
+#
+# Every source needs:
+#   id        unique, lowercase letters/digits/dashes (used in URLs and saved state; don't rename casually)
+#   name      shown on each item and in the sidebar
+#   feed      the RSS or Atom feed URL
+#   site      the publication's homepage (used for links and relative URLs)
+#   category  sidebar category: Cyber or Geopolitics
+#   group     sidebar group inside the category
+# Optional:
+#   enabled        false to keep a source listed but not fetched (default true)
+#   summary_from   auto (default), description, or content: which feed field to summarize
+#   exclude_title  list of regular expressions; matching headlines are skipped
+#
+# After editing, the CI "Feed check" job tests every feed and reports problems in its summary.
+
+settings:
+  retention_days: 7          # how long items stay on the dashboard
+  max_items_per_source: 50   # newest entries taken from each feed per refresh
+  summary_max_chars: 320     # summaries are trimmed to about this many characters
+
+sources:
+  # ── Cyber · Government & CERT ────────────────────────────────────────────
+  - id: cisa
+    name: CISA Advisories
+    feed: https://www.cisa.gov/cybersecurity-advisories/all.xml
+    site: https://www.cisa.gov/news-events/cybersecurity-advisories
+    category: Cyber
+    group: Government & CERT
+
+  - id: ncsc-uk
+    name: UK NCSC
+    feed: https://www.ncsc.gov.uk/api/1/services/v1/all-rss-feed.xml
+    site: https://www.ncsc.gov.uk/
+    category: Cyber
+    group: Government & CERT
+
+  - id: sans-isc
+    name: SANS Internet Storm Center
+    feed: https://isc.sans.edu/rssfeed_full.xml
+    site: https://isc.sans.edu/
+    category: Cyber
+    group: Government & CERT
+
+  # ── Cyber · Threat research ──────────────────────────────────────────────
+  - id: google-threat-intel
+    name: Google Threat Intelligence
+    feed: https://cloud.google.com/blog/topics/threat-intelligence/rss/
+    site: https://cloud.google.com/blog/topics/threat-intelligence
+    category: Cyber
+    group: Threat research
+
+  - id: google-tag
+    name: Google Threat Analysis Group
+    feed: https://blog.google/threat-analysis-group/rss/
+    site: https://blog.google/threat-analysis-group/
+    category: Cyber
+    group: Threat research
+
+  - id: microsoft-threat-intel
+    name: Microsoft Threat Intelligence
+    feed: https://www.microsoft.com/en-us/security/blog/topic/threat-intelligence/feed/
+    site: https://www.microsoft.com/en-us/security/blog/topic/threat-intelligence/
+    category: Cyber
+    group: Threat research
+
+  - id: talos
+    name: Cisco Talos
+    feed: https://blog.talosintelligence.com/rss/
+    site: https://blog.talosintelligence.com/
+    category: Cyber
+    group: Threat research
+
+  - id: unit42
+    name: Unit 42
+    feed: https://unit42.paloaltonetworks.com/feed/
+    site: https://unit42.paloaltonetworks.com/
+    category: Cyber
+    group: Threat research
+
+  - id: securelist
+    name: Kaspersky Securelist
+    feed: https://securelist.com/feed/
+    site: https://securelist.com/
+    category: Cyber
+    group: Threat research
+
+  - id: eset
+    name: ESET WeLiveSecurity
+    feed: https://www.welivesecurity.com/en/rss/feed/
+    site: https://www.welivesecurity.com/en/
+    category: Cyber
+    group: Threat research
+
+  - id: checkpoint-research
+    name: Check Point Research
+    feed: https://research.checkpoint.com/feed/
+    site: https://research.checkpoint.com/
+    category: Cyber
+    group: Threat research
+
+  - id: sentinellabs
+    name: SentinelLabs
+    feed: https://www.sentinelone.com/labs/feed/
+    site: https://www.sentinelone.com/labs/
+    category: Cyber
+    group: Threat research
+
+  - id: sophos-xops
+    name: Sophos X-Ops
+    feed: https://news.sophos.com/en-us/category/threat-research/feed/
+    site: https://news.sophos.com/en-us/category/threat-research/
+    category: Cyber
+    group: Threat research
+
+  - id: dfir-report
+    name: The DFIR Report
+    feed: https://thedfirreport.com/feed/
+    site: https://thedfirreport.com/
+    category: Cyber
+    group: Threat research
+
+  # ── Cyber · Security news ────────────────────────────────────────────────
+  - id: the-record
+    name: The Record
+    feed: https://therecord.media/feed/
+    site: https://therecord.media/
+    category: Cyber
+    group: Security news
+
+  - id: bleepingcomputer
+    name: BleepingComputer
+    feed: https://www.bleepingcomputer.com/feed/
+    site: https://www.bleepingcomputer.com/
+    category: Cyber
+    group: Security news
+
+  - id: krebs
+    name: Krebs on Security
+    feed: https://krebsonsecurity.com/feed/
+    site: https://krebsonsecurity.com/
+    category: Cyber
+    group: Security news
+
+  - id: the-hacker-news
+    name: The Hacker News
+    feed: https://feeds.feedburner.com/TheHackersNews
+    site: https://thehackernews.com/
+    category: Cyber
+    group: Security news
+
+  - id: securityweek
+    name: SecurityWeek
+    feed: https://www.securityweek.com/feed/
+    site: https://www.securityweek.com/
+    category: Cyber
+    group: Security news
+
+  - id: dark-reading
+    name: Dark Reading
+    feed: https://www.darkreading.com/rss.xml
+    site: https://www.darkreading.com/
+    category: Cyber
+    group: Security news
+
+  - id: cyberscoop
+    name: CyberScoop
+    feed: https://cyberscoop.com/feed/
+    site: https://cyberscoop.com/
+    category: Cyber
+    group: Security news
+
+  - id: risky-bulletin
+    name: Risky Bulletin
+    feed: https://news.risky.biz/rss/
+    site: https://news.risky.biz/
+    category: Cyber
+    group: Security news
+
+  # ── Geopolitics · Analysis & investigations ──────────────────────────────
+  - id: bellingcat
+    name: Bellingcat
+    feed: https://www.bellingcat.com/feed/
+    site: https://www.bellingcat.com/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  - id: isw
+    name: Institute for the Study of War
+    feed: https://understandingwar.org/feed/
+    site: https://understandingwar.org/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  - id: critical-threats
+    name: Critical Threats (AEI)
+    feed: https://www.criticalthreats.org/feed
+    site: https://www.criticalthreats.org/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  - id: crisis-group
+    name: International Crisis Group
+    feed: https://www.crisisgroup.org/rss
+    site: https://www.crisisgroup.org/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  - id: csis
+    name: CSIS
+    feed: https://www.csis.org/rss.xml
+    site: https://www.csis.org/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  - id: dfrlab
+    name: DFRLab (Atlantic Council)
+    feed: https://dfrlab.org/feed/
+    site: https://dfrlab.org/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  - id: acled
+    name: ACLED
+    feed: https://acleddata.com/feed/
+    site: https://acleddata.com/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  - id: long-war-journal
+    name: FDD's Long War Journal
+    feed: https://www.longwarjournal.org/feed
+    site: https://www.longwarjournal.org/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  - id: rusi
+    name: RUSI
+    feed: https://www.rusi.org/rss.xml
+    site: https://www.rusi.org/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  # ── Geopolitics · World news ─────────────────────────────────────────────
+  - id: bbc-world
+    name: BBC News – World
+    feed: https://feeds.bbci.co.uk/news/world/rss.xml
+    site: https://www.bbc.com/news/world
+    category: Geopolitics
+    group: World news
+
+  - id: al-jazeera
+    name: Al Jazeera
+    feed: https://www.aljazeera.com/xml/rss/all.xml
+    site: https://www.aljazeera.com/
+    category: Geopolitics
+    group: World news
+
+  - id: guardian-world
+    name: The Guardian – World
+    feed: https://www.theguardian.com/world/rss
+    site: https://www.theguardian.com/world
+    category: Geopolitics
+    group: World news
+
+  # ── Optional extras: set enabled to true to add them ─────────────────────
+  - id: help-net-security
+    name: Help Net Security
+    feed: https://www.helpnetsecurity.com/feed/
+    site: https://www.helpnetsecurity.com/
+    category: Cyber
+    group: Security news
+    enabled: false
+
+  - id: infosecurity-magazine
+    name: Infosecurity Magazine
+    feed: https://www.infosecurity-magazine.com/rss/news/
+    site: https://www.infosecurity-magazine.com/
+    category: Cyber
+    group: Security news
+    enabled: false
+
+  - id: ars-security
+    name: Ars Technica – Security
+    feed: https://feeds.arstechnica.com/arstechnica/security
+    site: https://arstechnica.com/security/
+    category: Cyber
+    group: Security news
+    enabled: false
+
+  - id: project-zero
+    name: Google Project Zero
+    feed: https://googleprojectzero.blogspot.com/feeds/posts/default
+    site: https://googleprojectzero.blogspot.com/
+    category: Cyber
+    group: Threat research
+    enabled: false
+
+  - id: the-diplomat
+    name: The Diplomat
+    feed: https://thediplomat.com/feed/
+    site: https://thediplomat.com/
+    category: Geopolitics
+    group: Analysis & investigations
+    enabled: false
+
+  - id: kyiv-independent
+    name: The Kyiv Independent
+    feed: https://kyivindependent.com/rss/
+    site: https://kyivindependent.com/
+    category: Geopolitics
+    group: World news
+    enabled: false
+
+  - id: dw-world
+    name: DW – World
+    feed: https://rss.dw.com/xml/rss-en-world
+    site: https://www.dw.com/en/
+    category: Geopolitics
+    group: World news
+    enabled: false
+
+  - id: france24
+    name: France 24
+    feed: https://www.france24.com/en/rss
+    site: https://www.france24.com/en/
+    category: Geopolitics
+    group: World news
+    enabled: false
+
+  - id: un-news
+    name: UN News
+    feed: https://news.un.org/feed/subscribe/en/news/all/rss.xml
+    site: https://news.un.org/en/
+    category: Geopolitics
+    group: World news
+    enabled: false
