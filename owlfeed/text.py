@@ -23,8 +23,7 @@ _WHITESPACE = re.compile(r"\s+")
 _LEFTOVER_ENTITY = re.compile(r"&(?:#\d{1,7}|#x[0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});")
 # Real markup that survived a first decoding pass, i.e. double-escaped HTML ("&lt;p&gt;…&lt;/p&gt;").
 # Only common content tags count, and a paragraph is parsed again only when it opens with such a tag
-# (or a complete comment), closes one, or holds markup no one writes in prose (a line break glued to
-# a word, a tracking pixel, a WordPress comment). Prose that names a tag ("inject a <pre> block",
+# (or a complete comment) or closes one. Prose that names a tag ("inject a <pre> block",
 # "an <!-- HTML comment -->", "How <script> tags hide malware") keeps its words.
 _CONTENT_TAGS = (
     r"(?:p|div|span|a|em|strong|b|i|u|ul|ol|li|h[1-6]|br|hr|figure|img|blockquote|table|tbody|tr|td|th"
@@ -32,10 +31,18 @@ _CONTENT_TAGS = (
 )
 _ESCAPED_OPENING = re.compile(rf"<!--.*?-->|<{_CONTENT_TAGS}(?:\s[^<>]*)?/?>", re.IGNORECASE | re.DOTALL)
 _ESCAPED_CLOSING = re.compile(rf"</{_CONTENT_TAGS}\s*>", re.IGNORECASE)
-_ESCAPED_VOID = re.compile(
-    r"(?<=\S)<br\s*/?>|<br\s*/?>(?=\S)|<img\s[^<>]*\bsrc\s*=\s*[\"']https?://[^<>]*>|<!--\s*(?:more|/?wp:)[^<>]*-->",
-    re.IGNORECASE,
+# Void markup no one writes in prose, removed on its own (other tags the text names keep their words):
+# line breaks glued to a word or a sentence end ("Friday.<br /><br />The"), a 1x1 tracking pixel, and
+# a WordPress comment standing between sentences. "converts newlines to <br>, but" is prose.
+_STRAY_BREAKS = re.compile(
+    r"(?<=[\w.!?:;])<br\s*/?>(?:\s*<br\s*/?>)*\s*|(?:<br\s*/?>\s*)*<br\s*/?>(?=\w)", re.IGNORECASE
 )
+_STRAY_COMMENT = re.compile(r"(?:^|(?<=[.!?]))\s*<!--\s*(?:more|/?wp:)[^<>]*-->\s*(?=$|[A-Z<])", re.IGNORECASE)
+_IMAGE_TAG = re.compile(r"<img\s[^<>]*>", re.IGNORECASE)
+_HTTP_SRC = re.compile(r"""\bsrc\s*=\s*["']https?://""", re.IGNORECASE)
+_QUOTED_SRC = re.compile(r"""\bsrc\s*=\s*["']""", re.IGNORECASE)
+_PIXEL_SIZE = re.compile(r"""\b(?:width|height)\s*=\s*["']?[01](?![\d.])""", re.IGNORECASE)
+_EVENT_HANDLER = re.compile(r"\son[a-z]+\s*=", re.IGNORECASE)
 # Removed whole before the second pass: a caption, script or style that really closes, taken from its
 # nearest opening tag, so a mentioned "<script>" earlier in the text cannot hide the words after it.
 _CLOSED_SKIP = re.compile(rf"<({'|'.join(sorted(SKIP_TAGS))})\b[^<>]*>(?:(?!<\1\b).)*?</\1\s*>", re.IGNORECASE | re.DOTALL)
@@ -50,10 +57,6 @@ _ABBREVIATION = re.compile(
 )
 # "3 a.m. local time", "Smith et al. found": a short, dotted or listed lowercase word before the period.
 _LOWERCASE_ABBREVIATION = re.compile(r"(?:\b[a-z]{1,3}|\.[a-z]|\b(?:incl|excl|approx|govt|dept|esp|resp|misc))\.$")
-# Stray markup in plain-text titles: a line break glued to a word, an image with a quoted source.
-# A tag named in a headline ("XSS via <img> tags", "<img src=x onerror=…>") stays.
-_PLAIN_TITLE_BREAK = re.compile(r"(?<=\S)<br\s*/?>|<br\s*/?>(?=\S)", re.IGNORECASE)
-_PLAIN_TITLE_IMAGE = re.compile(r"""<img\s[^<>]*\bsrc\s*=\s*["'][^<>]*>""", re.IGNORECASE)
 _TERMINAL = re.compile(r"[.!?…:;\"'”’)\]]$")
 
 # Whole (short) paragraphs that are never part of an article's summary.
@@ -104,6 +107,19 @@ _TITLE_DATE_SUFFIX = re.compile(r",?\s*\((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [A-Z][
 _BRACKET_ELLIPSIS = re.compile(r"\s*\[\s*(?:…|\.\.\.)\s*\]")
 # "…sentence.…" -> "…sentence." (some feeds append an ellipsis to complete sentences)
 _PUNCTUATED_ELLIPSIS = re.compile(r"([.!?])\s*…$")
+
+
+def _is_tracking_pixel(tag: str) -> bool:
+    return bool(_HTTP_SRC.search(tag) and _PIXEL_SIZE.search(tag))
+
+
+def _is_stray_title_image(tag: str) -> bool:
+    """An image with a quoted source, unless it is the payload the headline is about (onerror=…)."""
+    return bool(_QUOTED_SRC.search(tag) and not _EVENT_HANDLER.search(tag))
+
+
+def _drop_images(text: str, stray) -> str:
+    return _IMAGE_TAG.sub(lambda m: " " if stray(m.group(0)) else m.group(0), text)
 
 
 class _ParagraphExtractor(HTMLParser):
@@ -175,12 +191,11 @@ def html_to_paragraphs(value: object) -> list[str]:
         # Double-escaped HTML ("&lt;p&gt;") only becomes markup after the first pass. Captions, scripts,
         # styles and the like that really close are cut out first; then nothing is skipped, so prose that
         # mentions "<script>" next to real markup keeps the words after it.
-        if (
-            _ESCAPED_OPENING.match(paragraph.lstrip(_INVISIBLE_LEAD))
-            or _ESCAPED_CLOSING.search(paragraph)
-            or _ESCAPED_VOID.search(paragraph)
-        ):
+        if _ESCAPED_OPENING.match(paragraph.lstrip(_INVISIBLE_LEAD)) or _ESCAPED_CLOSING.search(paragraph):
             paragraphs.extend(_parse_paragraphs(_CLOSED_SKIP.sub(" ", paragraph), frozenset(), raw_text=False))
+        elif "<" in paragraph:
+            cleaned = _STRAY_COMMENT.sub(" ", _drop_images(paragraph, _is_tracking_pixel))
+            paragraphs.extend(p for p in map(collapse_whitespace, _STRAY_BREAKS.split(cleaned)) if p)
         else:
             paragraphs.append(paragraph)
     return [p for p in paragraphs if p]
@@ -194,8 +209,9 @@ def html_to_text(value: object) -> str:
 def clean_title(value: object, max_chars: int = 300, plain: bool = False) -> str:
     """plain=True for titles the feed marks as plain text: they are decoded already, not HTML."""
     if plain and isinstance(value, str):
-        # Stray line breaks and images still show up in some plain titles; tag names in words stay.
-        text = _PLAIN_TITLE_BREAK.sub(" ", _PLAIN_TITLE_IMAGE.sub("", value))
+        # Stray line breaks and images still show up in some plain titles; a tag the headline names
+        # ("XSS via <img> tags", "<img src=x onerror=…>", "fixes <br>-handling flaw") stays.
+        text = _STRAY_BREAKS.sub(" ", _drop_images(value, _is_stray_title_image))
         text = collapse_whitespace(_LEFTOVER_ENTITY.sub(lambda m: unescape(m.group(0)), text))
     else:
         text = html_to_text(value)

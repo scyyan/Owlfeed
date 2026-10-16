@@ -312,9 +312,28 @@ def test_plain_titles_keep_tag_mentions_that_are_the_story():
     for title in (
         "Chrome bug let <img> tags leak cross-origin data",
         "Stored XSS via <img src=x onerror=alert(1)> hits Roundcube webmail",
+        'Stored XSS via <img src="x" onerror="alert(1)"> hits Roundcube webmail',
         "Firefox fixes <br> parsing flaw that broke sanitizers",
+        'Firefox fixes "<br>" parsing flaw that broke sanitizers',
+        "Sanitizer bypass with <br>, <p> and <hr> tags fools DOMPurify",
     ):
         assert clean_title(title, plain=True) == title
+
+
+def test_prose_that_names_void_tags_keeps_every_word():
+    for text in (
+        "The sanitizer allowed elements like <p>, <br>, and <hr> but stripped <script> tags, so the payload went "
+        "through attribute values instead.",
+        'The advisory says input such as "<script>alert(1)</script>" or "<br>" is reflected without encoding.',
+        'The CSRF request hides in an image tag such as <img src="https://bank.example/transfer?to=x">, which loads.',
+        "The plugin converts newlines to <br>-separated lines but does not escape the rest of the comment body.",
+        "Wordfence found the payload inside a <!-- wp:html --> block that editors rarely open.",
+    ):
+        escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        assert summary_text(f"<p>{escaped}</p>") == text
+    assert clean_title("Chrome fixes &lt;br&gt;-handling flaw in its HTML sanitizer") == (
+        "Chrome fixes <br>-handling flaw in its HTML sanitizer"
+    )
 
 
 def test_truncate_does_not_end_at_a_quoted_question_or_long_abbreviation():

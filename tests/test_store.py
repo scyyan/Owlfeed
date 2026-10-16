@@ -276,3 +276,17 @@ def test_tombstone_dates_are_normalized_and_their_number_is_capped(monkeypatch):
     }
     state = merge(previous, CONFIG, {"alpha": ok(), "bravo": ok()}, NOW)
     assert sorted(state["expired"]) == ["t0", "t1"]
+
+
+def test_a_304_does_not_keep_tombstones_of_items_the_feed_dropped():
+    nodate = entry("nodate", published=None)
+    first = merge(None, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, NOW)
+    expired_at = NOW + timedelta(days=8)
+    state = merge(first, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, expired_at)
+    # The feed drops the item, then stops changing for a while.
+    state = merge(state, CONFIG, {"alpha": ok(entry("other", published=None)), "bravo": ok()}, expired_at + timedelta(days=1))
+    for day in (2, 20, 35):
+        state = merge(state, CONFIG, {"alpha": NOT_MODIFIED, "bravo": ok()}, expired_at + timedelta(days=day))
+    assert state["expired"]["id-nodate"]["since"] == iso(expired_at)  # not refreshed by the 304s
+    later = merge(state, CONFIG, {"alpha": ok(entry("other", published=None)), "bravo": ok()}, expired_at + timedelta(days=36))
+    assert "id-nodate" not in later["expired"]

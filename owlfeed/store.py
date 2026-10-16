@@ -198,15 +198,24 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
         for source_id, outcome in outcomes.items()
         if outcome is not None and outcome.entries is not None
     }
+    # When each source last answered (200 or 304) before this run. Tombstones the feed listed then were
+    # stamped with that time, so a 304 now (the same feed again) still lists exactly those.
+    last_ok_before: dict[str, str] = {}
+    for row in (previous or {}).get("sources", []):
+        if isinstance(row, dict) and isinstance(row.get("id"), str):
+            last_ok = parse_iso(row.get("last_ok"))
+            if last_ok is not None:
+                last_ok_before[row["id"]] = iso(last_ok)
     tombstone_cutoff = iso(now - timedelta(days=TOMBSTONE_DAYS))
     expired: dict[str, dict] = {}
     for item_id, mark in expired_before.items():
         outcome = outcomes.get(mark["source"])
         listed = fresh_ids.get(mark["source"])
         unchanged = outcome is not None and outcome.error is None and outcome.entries is None  # a 304
-        if unchanged or (listed is not None and item_id in listed):
-            # Still in the feed (or the feed is unchanged since it was): the 30 days count from the
-            # last time it could have been listed, so one short response later cannot revive it.
+        prior_ok = last_ok_before.get(mark["source"])
+        if (listed is not None and item_id in listed) or (unchanged and (prior_ok is None or mark["since"] >= prior_ok)):
+            # Still in the feed (or in the unchanged feed): the 30 days count from the last time it
+            # was listed, so one short response later cannot revive it.
             expired[item_id] = {"source": mark["source"], "since": now_iso}
         elif listed is None or mark["since"] >= tombstone_cutoff:
             # Kept while the source fails, so a feed that is down for a month cannot bring its old
