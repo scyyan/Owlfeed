@@ -21,18 +21,30 @@ HEADING_MAX_CHARS = 40
 
 _WHITESPACE = re.compile(r"\s+")
 _LEFTOVER_ENTITY = re.compile(r"&(?:#\d{1,7}|#x[0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});")
-_TAG_LIKE = re.compile(r"<[a-zA-Z/!][^>]*>")
+# Real markup that survived a first decoding pass, i.e. double-escaped HTML ("&lt;p&gt;").
+# Only common content tags count, so a headline about "<script>" tags keeps its text.
+_ESCAPED_MARKUP = re.compile(
+    r"</?(?:p|div|span|a|em|strong|b|i|u|ul|ol|li|h[1-6]|br|hr|figure|img|blockquote|table|tr|td)"
+    r"(?:\s[^<>]{0,300})?/?>",
+    re.IGNORECASE,
+)
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]?(?=\s)")
+# A period after these is not a sentence end: "U.S.", "J. Smith", "Gen. Smith", "Oct. 12".
+_ABBREVIATION = re.compile(
+    r"(?:\b[A-Z]|\b(?:Mr|Mrs|Ms|Dr|Prof|St|Mt|Inc|Ltd|Co|Corp|Gen|Gov|Sen|Rep|Lt|Col|Sgt|Capt|No|vs|etc"
+    r"|approx|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec|e\.g|i\.e))\.$"
+)
 _TERMINAL = re.compile(r"[.!?…:;\"'”’)\]]$")
 
-# Whole paragraphs that are never part of an article's summary.
+# Whole (short) paragraphs that are never part of an article's summary.
+JUNK_MAX_CHARS = 300
 _JUNK_PARAGRAPH = re.compile(
     r"^(?:"
-    r"sign up\b|subscribe\b|click here\b|read more\b|continue reading\b|keep reading\b"
+    r"sign up\b|subscribe (?:to|now|for|here|today)\b|click here\b|read more\b|continue reading\b|keep reading\b"
     r"|the (?:post|article) .+ (?:appeared|was published) first on\b"
     r"|this (?:article|story|post) (?:was )?(?:originally|first) (?:appeared|published)\b"
-    r"|\(c\)\s|©|copyright\b|creative commons\b"
-    r"|categories:|tags:|filed under\b"
+    r"|\(c\)\s|©|copyright\s*(?:©|\(c\)|\d{4})|creative commons\b"
+    r"|categories:|tags:|filed under:"
     r"|view csaf\b|written by:"
     r"|for the latest discoveries in cyber research\b"
     r"|(?:check out our (?:products|services)|want a demo|contact us (?:today|for)|request a demo|book a demo)\b"
@@ -45,8 +57,10 @@ _JUNK_PARAGRAPH = re.compile(
 _INLINE_BOILERPLATE = [
     re.compile(r"\s*The (?:post|article) .{1,400}? (?:appeared|was published) first on .{1,200}$", re.I | re.S),
     re.compile(r"\s*This (?:article|story|post) (?:was )?(?:originally|first) (?:appeared|published) (?:on|in|at) .{0,200}$", re.I | re.S),
+    # Only as a trailing call to action: at the start or right after a sentence end, never mid-word
+    # ("can spread more") or mid-sentence.
     re.compile(
-        r"\s*(?:Continue reading|Keep reading|Read more|Read the (?:full|rest of the|complete) "
+        r"(?:^|(?<=[.!?…\]»)]))\s*(?:Continue reading|Keep reading|Read more|Read the (?:full|rest of the|complete) "
         r"(?:story|article|post|report|analysis)|Click here to read more)\b.{0,200}$",
         re.I | re.S,
     ),
@@ -126,7 +140,7 @@ def html_to_paragraphs(value: object) -> list[str]:
     paragraphs = []
     for paragraph in _parse_paragraphs(value):
         # Double-escaped HTML ("&lt;p&gt;") only becomes markup after the first pass.
-        paragraphs.extend(_parse_paragraphs(paragraph) if _TAG_LIKE.search(paragraph) else [paragraph])
+        paragraphs.extend(_parse_paragraphs(paragraph) if _ESCAPED_MARKUP.search(paragraph) else [paragraph])
     return [p for p in paragraphs if p]
 
 
@@ -145,7 +159,7 @@ def _is_heading(paragraph: str) -> bool:
 
 def summary_text(value: object, title: str = "") -> str:
     """Readable summary text: junk paragraphs and headings dropped, paragraphs joined as sentences."""
-    kept = [p for p in html_to_paragraphs(value) if not _JUNK_PARAGRAPH.match(p)]
+    kept = [p for p in html_to_paragraphs(value) if not (len(p) <= JUNK_MAX_CHARS and _JUNK_PARAGRAPH.match(p))]
     body = [p for p in kept if not _is_heading(p)] or kept
     sentences = [p if i == len(body) - 1 or _TERMINAL.search(p) else p + "." for i, p in enumerate(body)]
     return strip_boilerplate(" ".join(sentences), title)
@@ -175,7 +189,7 @@ def truncate(text: str, max_chars: int) -> str:
     window = text[: max_chars + 1]
     cut = 0
     for match in _SENTENCE_END.finditer(window):
-        if max_chars // 2 <= match.end() <= max_chars:
+        if max_chars // 2 <= match.end() <= max_chars and not _ABBREVIATION.search(text[: match.start() + 1]):
             cut = match.end()
     if cut:
         return text[:cut].rstrip()

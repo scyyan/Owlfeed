@@ -136,6 +136,13 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
     enabled_ids = {s.id for s in sources}
     now_iso = iso(now)
 
+    # Undated items that aged out, kept as {id: source} while their feed still lists them, so they
+    # are not re-created as brand-new items on the next run.
+    raw_expired = (previous or {}).get("expired")
+    expired_before = {
+        k: v for k, v in (raw_expired.items() if isinstance(raw_expired, dict) else []) if isinstance(k, str) and v in enabled_ids
+    }
+
     merged: dict[str, dict] = {}
     for raw in (previous or {}).get("items", []):
         item = _clean_previous_item(raw)
@@ -150,6 +157,8 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
             existing = merged.get(entry.id)
             if existing and existing["source"] != source.id:
                 continue  # the same article is already listed under another source
+            if not existing and entry.published is None and expired_before.get(entry.id) == source.id:
+                continue  # an undated item that already had its 7 days
             first_seen = existing["first_seen"] if existing else now_iso
             if entry.published is not None:
                 published, estimated = iso(entry.published), False
@@ -170,6 +179,19 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
 
     cutoff = iso(now - timedelta(days=config.settings.retention_days))
     items = [item for item in merged.values() if item["published"] >= cutoff]
+
+    fresh_ids = {
+        source_id: {entry.id for entry in outcome.entries}
+        for source_id, outcome in outcomes.items()
+        if outcome is not None and outcome.entries is not None
+    }
+    expired: dict[str, str] = {}
+    for item_id, source_id in expired_before.items():
+        if source_id not in fresh_ids or item_id in fresh_ids[source_id]:
+            expired[item_id] = source_id  # still listed (or not re-checked this run)
+    for item in merged.values():
+        if item["published"] < cutoff and item["date_estimated"]:
+            expired[item["id"]] = item["source"]
     items.sort(key=lambda item: item["title"].casefold())
     items.sort(key=lambda item: (item["published"], item["first_seen"]), reverse=True)
     items = items[:MAX_ITEMS]
@@ -214,6 +236,7 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
         "retention_days": config.settings.retention_days,
         "sources": rows,
         "items": items,
+        "expired": expired,
     }
 
 
@@ -225,6 +248,7 @@ def write_state(state: dict, path: str | Path) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(state, handle, ensure_ascii=False, separators=(",", ":"))
+        os.chmod(tmp, 0o644)  # mkstemp creates 0600; the published file must be world-readable
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)

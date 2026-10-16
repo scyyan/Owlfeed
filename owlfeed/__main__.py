@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import io
 import logging
 import os
+import re
+import secrets
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -54,6 +57,9 @@ def collect(config: Config, sources: tuple[Source, ...], validators: dict, now: 
                 entries = parse_feed(result.content or b"", source, config.settings, now, result.content_type)
             except FeedParseError as exc:
                 outcomes[source.id] = SourceOutcome(result, None, str(exc))
+            except Exception as exc:  # noqa: BLE001 - a parser bug on one feed must not sink the build
+                log.exception("Unexpected error parsing %s", source.id)
+                outcomes[source.id] = SourceOutcome(result, None, f"could not parse feed ({type(exc).__name__})")
             else:
                 outcomes[source.id] = SourceOutcome(result, entries, None)
     return outcomes
@@ -65,6 +71,12 @@ def cmd_build(args: argparse.Namespace) -> int:
     try:
         if args.previous_url:
             previous = load_previous_url(args.previous_url)
+            if previous is None and args.fallback_file:
+                # The live feed is missing (first run, or Pages answering 404 for a moment). A saved
+                # copy from an earlier run keeps the 7-day history instead of starting from scratch.
+                previous = load_previous_file(args.fallback_file)
+                if previous is not None:
+                    log.info("Using the saved copy %s instead", args.fallback_file)
         elif args.previous_file:
             previous = load_previous_file(args.previous_file)
         else:
@@ -125,7 +137,7 @@ def _inspect(source_id: str, outcome: SourceOutcome) -> None:
     print(f"\n=== inspect {source_id}: HTTP {result.status}, content-type {result.content_type!r}")
     content = result.content or b""
     print(content[:1500].decode("utf-8", errors="replace"))
-    parsed = feedparser.parse(content, response_headers={"content-type": result.content_type or ""})
+    parsed = feedparser.parse(io.BytesIO(content), response_headers={"content-type": result.content_type or ""})
     print(f"--- feedparser version={parsed.get('version')!r} bozo={parsed.get('bozo')} entries={len(parsed.entries)}")
     for entry in parsed.entries[:2]:
         for key in sorted(entry):
@@ -133,9 +145,19 @@ def _inspect(source_id: str, outcome: SourceOutcome) -> None:
         print("    ---")
 
 
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+!|~])")
+
+
 def _cell(text: str, limit: int = 90) -> str:
-    text = text.replace("|", "\\|").replace("\n", " ")
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    """Feed text made inert for a Markdown table cell: no links, images, HTML or column breaks."""
+    text = " ".join(text.split())
+    text = text if len(text) <= limit else text[: limit - 1] + "…"
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", text)
+
+
+def _newest(entries: list[Entry]) -> datetime | None:
+    return max((e.published for e in entries if e.published), default=None)
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -149,18 +171,22 @@ def cmd_check(args: argparse.Namespace) -> int:
         rows.append(CheckRow(source, outcome.result.status, outcome.entries, outcome.error))
 
     in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    # Feed text is printed below; stop the Actions runner from treating any of it as a
+    # workflow command ("::error::", "::add-mask::" ...). Our own warnings go out afterwards.
+    resume = secrets.token_hex(16)
+    if in_actions:
+        print(f"::stop-commands::{resume}")
     failures = 0
+    warnings: list[str] = []
     print(f"Owlfeed feed check at {iso(now)}: {len(rows)} sources\n")
     for row in rows:
         entries = row.entries or []
         label = "OK  " if not row.error and entries else ("FAIL" if row.error else "EMPTY")
         if label != "OK  " and row.source.enabled:
             failures += 1
-            if in_actions:
-                problem = row.error or "feed has no items"
-                print(f"::warning title=Feed check::{row.source.name} ({row.source.id}): {problem}")
+            warnings.append(f"{row.source.name} ({row.source.id}): {row.error or 'feed has no items'}")
         flag = "" if row.source.enabled else " [disabled]"
-        newest = entries[0].published if entries else None
+        newest = _newest(entries)
         dated = sum(1 for e in entries if e.published)
         print(
             f"{label} {row.source.id}{flag} | {row.source.category} / {row.source.group} | "
@@ -185,6 +211,12 @@ def cmd_check(args: argparse.Namespace) -> int:
             continue
         _inspect(source_id, outcome)
 
+    if in_actions:
+        print(f"::{resume}::")
+        for warning in warnings:
+            # Error text comes from our own code, but strip anything that could end the command early.
+            print(f"::warning title=Feed check::{warning.replace('::', ': :').replace(chr(10), ' ')}")
+
     if args.summary_file:
         lines = [
             "## Owlfeed feed check",
@@ -199,7 +231,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             mark = "✅" if not row.error and entries else ("❌" if row.error else "⚠️")
             name = row.source.name + ("" if row.source.enabled else " *(disabled)*")
             latest = entries[0].title if entries else (row.error or "no items")
-            newest = _age(entries[0].published, now) if entries else ""
+            newest = _age(_newest(entries), now) if entries else ""
             lines.append(
                 f"| {mark} | {_cell(name, 40)} | {_cell(row.source.group, 30)} | {row.status or ''} | "
                 f"{len(entries)} | {newest} | {_cell(latest)} |"
@@ -220,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     previous = build.add_mutually_exclusive_group()
     previous.add_argument("--previous-url", help="URL of the currently deployed feed.json")
     previous.add_argument("--previous-file", help="path to a previous feed.json")
+    build.add_argument("--fallback-file", help="saved feed.json to use if --previous-url answers 404")
     build.set_defaults(func=cmd_build)
 
     check = commands.add_parser("check", help="report the health of every feed")

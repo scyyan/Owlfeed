@@ -25,7 +25,10 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        # Separate installs: pip's hash-checking mode would demand hashes for the dev tools too.
+        run: |
+          pip install --require-hashes -r requirements.txt
+          pip install -r requirements-dev.txt
       - name: Python unit tests
         run: python -m pytest -q --ignore=tests/e2e
       - name: JavaScript unit tests
@@ -39,6 +42,8 @@ jobs:
     # Fetches every feed in sources.yml from GitHub's network and reports problems
     # in the run summary. Informational only: a broken feed never fails CI.
     name: Feed check
+    # A pull request from this repository already ran the check on push; forks still get one.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -49,6 +54,6 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install --require-hashes -r requirements.txt
       - name: Check feeds
         run: python -m owlfeed check --include-disabled --samples 3 --summary-file "$GITHUB_STEP_SUMMARY"

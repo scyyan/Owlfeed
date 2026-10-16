@@ -1,3 +1,5 @@
+import threading
+
 import requests
 
 from owlfeed import fetch as fetch_module
@@ -6,15 +8,23 @@ from owlfeed.fetch import FetchResult, fetch, fetch_all
 from .conftest import make_source
 
 
-class FakeResponse:
-    def __init__(self, status=200, body=b"<rss/>", headers=None):
-        self.status_code = status
+class FakeRaw:
+    def __init__(self, body, on_read=None):
         self._body = body
-        self.headers = headers or {}
+        self._on_read = on_read
 
-    def iter_content(self, size):
-        for start in range(0, len(self._body), size):
-            yield self._body[start : start + size]
+    def read1(self, amt, decode_content=None):
+        if self._on_read:
+            self._on_read()
+        chunk, self._body = self._body[:amt], self._body[amt:]
+        return chunk
+
+
+class FakeResponse:
+    def __init__(self, status=200, body=b"<rss/>", headers=None, on_read=None):
+        self.status_code = status
+        self.headers = headers or {}
+        self.raw = FakeRaw(body, on_read)
 
     def __enter__(self):
         return self
@@ -93,3 +103,37 @@ def test_fetch_all_passes_validators_per_source():
     assert set(results) == {"one", "two"}
     assert seen["https://one.example.com/feed"] == ('"e1"', "lm1")
     assert seen["https://two.example.com/feed"] == (None, None)
+
+
+def test_slow_drip_bodies_hit_the_download_deadline(monkeypatch):
+    clock = iter(range(0, 1000, 7))  # every read takes 7 "seconds"
+    monkeypatch.setattr(fetch_module.time, "monotonic", lambda: next(clock))
+    get = Recorder(FakeResponse(200, b"x" * 200_000))
+    monkeypatch.setattr(fetch_module, "DOWNLOAD_DEADLINE", 20)
+    result = fetch("https://a.example/feed", get=get, sleep=no_sleep)
+    assert result.error.startswith("timed out") and result.content is None
+
+
+def test_fetch_all_reports_hung_sources_without_waiting_for_them():
+    release = threading.Event()
+
+    def fake_fetch(url, etag, last_modified):
+        if "slow" in url:
+            release.wait(30)  # simulates a server that never finishes
+        return FetchResult(status=200, content=b"<rss/>")
+
+    sources = [make_source("fast"), make_source("slow")]
+    try:
+        results = fetch_all(sources, fetcher=fake_fetch, deadline=0.5)
+    finally:
+        release.set()
+    assert results["fast"].content == b"<rss/>"
+    assert results["slow"].error.startswith("timed out")
+
+
+def test_fetch_all_contains_unexpected_errors():
+    def broken(url, etag, last_modified):
+        raise UnicodeError("weird header")
+
+    results = fetch_all([make_source("one")], fetcher=broken)
+    assert results["one"].error == "fetch failed (UnicodeError)"

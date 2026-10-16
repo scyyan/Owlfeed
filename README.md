@@ -47,9 +47,14 @@ sources.yml ─► GitHub Action (every 15 min) ─► data/feed.json ─► Git
    involved, and it costs nothing on a public repository.
 
 Feeds are fetched politely: a descriptive user agent, conditional requests (only download
-when something changed), timeouts, and one retry. If one source fails, its earlier items
-stay on the dashboard and its dot turns orange. If every source fails at once, nothing is
-published and the current dashboard stays up.
+when something changed), timeouts, and one retry. Each download is capped at 10 MB and
+60 seconds, and the whole fetch at 3 minutes, so one misbehaving site can't hold up the
+rest. If one source fails, its earlier items stay on the dashboard and its dot turns orange.
+If every source fails at once, nothing is published and the current dashboard stays up.
+
+The refresh also keeps a copy of the feed in GitHub's Actions cache. It's only used if the
+live `feed.json` ever answers "not found", so a GitHub Pages hiccup can't wipe the
+7-day history.
 
 ## One-time setup
 
@@ -107,7 +112,9 @@ Optional settings:
 
 Every push runs the **CI** workflow. Its *Feed check* job downloads every feed from GitHub's
 network and posts a table of what works in the run's summary. Check it after adding a
-source. A typo in `sources.yml` fails the tests before it can break the dashboard.
+source. If `sources.yml` has a mistake (a missing field, a duplicate id, broken YAML), the
+refresh stops before publishing and the dashboard keeps its last data. The CI run for that
+push shows exactly what's wrong.
 
 ## Troubleshooting
 
@@ -118,14 +125,15 @@ source. A typo in `sources.yml` fails the tests before it can break the dashboar
 - **A source has an orange dot.** Hover over it to see the error. Sites sometimes move their
   feeds or block automated requests. Find the new feed URL, update `sources.yml`, and
   confirm it in the CI *Feed check* summary.
-- **"No feed data published yet."** The first refresh hasn't finished. Check the
-  *Refresh feed* run in the *Actions* tab.
+- **"No feed data published yet"** when you open `site/index.html` yourself. The page needs
+  `site/data/feed.json`; run `python -m owlfeed build` first (see Development).
 
 ## Development
 
 ```sh
 python -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+pip install --require-hashes -r requirements.txt   # runtime packages, pinned with hashes
+pip install -r requirements-dev.txt                 # test tools
 
 python -m owlfeed build                 # fetch every feed into site/data/feed.json
 python -m owlfeed check --samples 3     # health report for every source
@@ -143,3 +151,5 @@ Layout:
 - `site/`: the dashboard (plain HTML, CSS and ES modules; no build step).
 - `tests/`: pytest suites, sample feeds, Node unit tests and Playwright browser tests.
 - `.github/workflows/`: CI, the 15-minute refresh and deploy, and the keepalive.
+- `requirements.in`: direct runtime dependencies. `requirements.txt` is generated from it with
+  `pip-compile --generate-hashes --strip-extras requirements.in` (from `pip-tools`).

@@ -1,13 +1,14 @@
-"""Download feeds politely: timeouts, conditional GET, a size cap and one retry."""
+"""Download feeds politely: timeouts, conditional GET, size and time caps, one retry."""
 
 from __future__ import annotations
 
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
 import requests
+import urllib3
 
 from . import __version__
 from .config import Source
@@ -17,7 +18,9 @@ ACCEPT = (
     "application/rss+xml, application/atom+xml, application/rdf+xml;q=0.9, "
     "application/xml;q=0.9, text/xml;q=0.9, */*;q=0.5"
 )
-TIMEOUT = (10, 20)  # (connect, read) seconds
+TIMEOUT = (10, 20)  # (connect, read) seconds, per socket operation
+DOWNLOAD_DEADLINE = 60.0  # seconds for a whole response body, however slowly it trickles in
+FETCH_ALL_DEADLINE = 180.0  # seconds for every source together; stragglers are reported as timed out
 MAX_BYTES = 10 * 1024 * 1024
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 WORKERS = 8
@@ -41,13 +44,26 @@ class _TooLarge(Exception):
     pass
 
 
+class _TooSlow(Exception):
+    pass
+
+
 def _read_limited(response: requests.Response) -> bytes:
+    """Read the (decompressed) body, enforcing both the size cap and a wall-clock deadline."""
+    deadline = DOWNLOAD_DEADLINE
     declared = response.headers.get("Content-Length", "")
     if declared.isdigit() and int(declared) > MAX_BYTES:
         raise _TooLarge
+    started = time.monotonic()
     chunks: list[bytes] = []
     size = 0
-    for chunk in response.iter_content(64 * 1024):
+    while True:
+        if time.monotonic() - started > deadline:
+            raise _TooSlow
+        # read1 returns as soon as any data arrives, so a slow drip cannot stall the deadline check.
+        chunk = response.raw.read1(64 * 1024, decode_content=True)
+        if not chunk:
+            break
         size += len(chunk)
         if size > MAX_BYTES:
             raise _TooLarge
@@ -55,14 +71,16 @@ def _read_limited(response: requests.Response) -> bytes:
     return b"".join(chunks)
 
 
-def _describe(exc: requests.RequestException) -> str:
-    if isinstance(exc, requests.Timeout):
+def _describe(exc: Exception) -> str:
+    if isinstance(exc, (requests.Timeout, urllib3.exceptions.TimeoutError)):
         return "timed out"
-    if isinstance(exc, requests.exceptions.SSLError):
+    if isinstance(exc, (requests.exceptions.SSLError, urllib3.exceptions.SSLError)):
         return "TLS/certificate error"
     if isinstance(exc, requests.TooManyRedirects):
         return "too many redirects"
-    if isinstance(exc, requests.ConnectionError):
+    if isinstance(exc, urllib3.exceptions.DecodeError):
+        return "invalid compressed response"
+    if isinstance(exc, (requests.ConnectionError, urllib3.exceptions.HTTPError)):
         return "connection failed"
     return f"request failed ({type(exc).__name__})"
 
@@ -107,7 +125,9 @@ def fetch(
                     )
         except _TooLarge:
             return FetchResult(error=f"response larger than {MAX_BYTES // (1024 * 1024)} MB")
-        except (requests.Timeout, requests.ConnectionError) as exc:
+        except _TooSlow:
+            return FetchResult(error=f"timed out (download took over {DOWNLOAD_DEADLINE:.0f} s)")
+        except (requests.Timeout, requests.ConnectionError, urllib3.exceptions.HTTPError) as exc:
             retryable_error = _describe(exc)
         except requests.RequestException as exc:
             return FetchResult(error=_describe(exc))
@@ -121,15 +141,37 @@ def fetch_all(
     validators: dict[str, tuple[str | None, str | None]] | None = None,
     *,
     fetcher: Callable[..., FetchResult] = fetch,
+    deadline: float = FETCH_ALL_DEADLINE,
 ) -> dict[str, FetchResult]:
-    """Fetch every source concurrently. Never raises for a single bad feed."""
+    """Fetch every source concurrently. Never raises for a single bad feed.
+
+    Daemon threads plus an overall deadline mean one hung server can neither block the
+    others' results nor keep the process alive after the build has finished.
+    """
     sources = list(sources)
     validators = validators or {}
+    results: dict[str, FetchResult] = {}
+    lock = threading.Lock()
+    slots = threading.BoundedSemaphore(WORKERS)
 
-    def run(source: Source) -> FetchResult:
-        etag, last_modified = validators.get(source.id, (None, None))
-        return fetcher(source.feed, etag, last_modified)
+    def run(source: Source) -> None:
+        with slots:
+            etag, last_modified = validators.get(source.id, (None, None))
+            try:
+                result = fetcher(source.feed, etag, last_modified)
+            except Exception as exc:  # noqa: BLE001 - any bug or odd library error stays per-source
+                result = FetchResult(error=f"fetch failed ({type(exc).__name__})")
+        with lock:
+            results[source.id] = result
 
-    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        results = list(pool.map(run, sources))
-    return {source.id: result for source, result in zip(sources, results)}
+    threads = [threading.Thread(target=run, args=(s,), name=f"fetch-{s.id}", daemon=True) for s in sources]
+    for thread in threads:
+        thread.start()
+    stop_at = time.monotonic() + deadline
+    for thread in threads:
+        thread.join(max(0.0, stop_at - time.monotonic()))
+    with lock:
+        return {
+            s.id: results.get(s.id, FetchResult(error=f"timed out (no complete response within {deadline:.0f} s)"))
+            for s in sources
+        }

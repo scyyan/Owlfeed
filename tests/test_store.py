@@ -180,3 +180,22 @@ def test_write_and_load_previous_file(tmp_path):
     assert load_previous_file(path) == state
     assert load_previous_file(tmp_path / "missing.json") is None
     assert not list(path.parent.glob(".feed-*"))  # no temp files left behind
+
+
+def test_expired_undated_items_do_not_come_back_as_new():
+    first = merge(None, CONFIG, {"alpha": ok(entry("nodate", published=None)), "bravo": ok()}, NOW)
+    week_later = NOW + timedelta(days=8)
+    second = merge(first, CONFIG, {"alpha": ok(entry("nodate", published=None)), "bravo": ok()}, week_later)
+    assert ids(second) == [] and second["expired"] == {"id-nodate": "alpha"}
+    third = merge(second, CONFIG, {"alpha": ok(entry("nodate", published=None)), "bravo": ok()}, week_later + timedelta(minutes=15))
+    assert ids(third) == [] and "id-nodate" in third["expired"]
+    # Once the feed stops listing it, the tombstone is dropped.
+    fourth = merge(third, CONFIG, {"alpha": ok(), "bravo": ok()}, week_later + timedelta(minutes=30))
+    assert fourth["expired"] == {}
+
+
+def test_written_feed_is_world_readable(tmp_path):
+    state = merge(None, CONFIG, {"alpha": ok(entry("a1")), "bravo": ok()}, NOW)
+    path = tmp_path / "feed.json"
+    write_state(state, path)
+    assert path.stat().st_mode & 0o777 == 0o644

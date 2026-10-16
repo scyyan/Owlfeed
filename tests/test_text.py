@@ -160,3 +160,31 @@ def test_summary_removes_ellipsis_after_complete_sentence():
 def test_make_summary_returns_short_text_when_nothing_better():
     assert make_summary({"summary": "Short teaser."}, "auto", "Title", 320) == "Short teaser."
     assert make_summary({}, "auto", "Title", 320) == ""
+
+
+def test_escaped_tag_names_in_text_are_kept():
+    assert clean_title("How &lt;script&gt; tags hide malware in ads") == "How <script> tags hide malware in ads"
+    assert summary_text("<p>Attackers inject &lt;iframe&gt; elements into checkout pages.</p>") == (
+        "Attackers inject <iframe> elements into checkout pages."
+    )
+
+
+def test_call_to_action_patterns_do_not_eat_ordinary_words():
+    for text in (
+        "A new variant of the botnet worm can spread more quickly across networks.",
+        "Analysts who read more than one report agreed on the attribution.",
+        "Investigators continue reading through the leaked chat logs.",
+    ):
+        assert summary_text(text) == text
+
+
+def test_junk_filters_keep_real_lead_paragraphs():
+    lead = "Copyright lawsuits against AI companies are piling up as publishers seek damages."
+    assert summary_text(f"<p>{lead}</p>") == lead
+    assert summary_text("<p>Subscribers to the service were notified of the breach on Friday.</p>").startswith("Subscribers")
+
+
+def test_truncate_does_not_cut_at_abbreviations():
+    text = "Officials in the U.S. and allied governments said the campaign targeted defense contractors across several regions for months."
+    result = truncate(text, 60)
+    assert result.endswith("…") and "U.S." in result

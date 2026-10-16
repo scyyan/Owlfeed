@@ -5,7 +5,7 @@ import pytest
 from owlfeed.config import Settings
 from owlfeed.parse import FeedParseError, clean_link, item_id, parse_feed, parse_loose_date
 
-from .conftest import NOW, feed_bytes, make_source
+from .conftest import FEEDS, NOW, feed_bytes, make_source
 
 
 def parse(name, settings=Settings(), **source_overrides):
@@ -114,3 +114,40 @@ def test_clean_link_strips_only_tracking_parameters():
 def test_item_id_ignores_scheme_case_and_fragment():
     assert item_id("https://Example.com/a") == item_id("http://example.com/a#top")
     assert item_id("https://example.com/a") != item_id("https://example.com/b")
+
+
+def test_response_body_is_never_treated_as_a_local_path():
+    path_body = str(FEEDS / "wordpress.xml").encode()
+    with pytest.raises(FeedParseError):
+        parse_feed(path_body, make_source("evil"), Settings(), NOW)
+    with pytest.raises(FeedParseError):
+        parse_feed(b"/dev/zero", make_source("evil"), Settings(), NOW)
+
+
+def test_one_malformed_entry_does_not_sink_the_feed():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>M</title><link>https://m.example/</link>
+    <item><title>Broken link</title><link>http://[not-an-ipv6/</link><pubDate>Wed, 15 Oct 2026 12:00:00 GMT</pubDate></item>
+    <item><title>Fine</title><link>https://m.example/fine</link><pubDate>Wed, 15 Oct 2026 11:00:00 GMT</pubDate></item>
+    </channel></rss>"""
+    assert [e.title for e in parse_feed(feed, make_source("m"), Settings(), NOW)] == ["Fine"]
+
+
+def test_zone_less_dates_use_the_source_timezone():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Z</title><link>https://z.example/</link>
+    <item><title>ISO</title><link>https://z.example/a</link><pubDate>2026-10-12T21:44:00</pubDate></item>
+    <item><title>RFC 822 without zone</title><link>https://z.example/b</link><pubDate>Mon, 12 Oct 2026 20:00:00</pubDate></item>
+    <item><title>With offset</title><link>https://z.example/c</link><pubDate>Mon, 12 Oct 2026 20:00:00 +0000</pubDate></item>
+    </channel></rss>"""
+    found = by_title(parse_feed(feed, make_source("z", timezone="Europe/Brussels"), Settings(), NOW))
+    assert found["ISO"].published == datetime(2026, 10, 12, 19, 44, tzinfo=timezone.utc)
+    assert found["RFC 822 without zone"].published == datetime(2026, 10, 12, 18, 0, tzinfo=timezone.utc)
+    assert found["With offset"].published == datetime(2026, 10, 12, 20, 0, tzinfo=timezone.utc)
+    utc = by_title(parse_feed(feed, make_source("z"), Settings(), NOW))
+    assert utc["RFC 822 without zone"].published == datetime(2026, 10, 12, 20, 0, tzinfo=timezone.utc)
+
+
+def test_undated_entries_come_after_dated_ones():
+    entries = parse("edge_cases.xml")
+    first_undated = next(i for i, e in enumerate(entries) if e.published is None)
+    assert all(e.published is None for e in entries[first_undated:])
+    assert all(e.published is not None for e in entries[:first_undated])

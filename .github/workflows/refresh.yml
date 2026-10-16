@@ -9,10 +9,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+permissions: {}
 
 # One refresh at a time, so two runs never race to publish.
 concurrency:
@@ -20,13 +17,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  refresh:
-    name: Build and publish
+  build:
+    # Runs the fetcher (third-party feeds and packages) with read-only permissions.
+    name: Fetch feeds
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: read # configure-pages looks up the site's URL
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -34,21 +32,51 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.txt
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install dependencies (hash-pinned)
+        run: pip install --require-hashes -r requirements.txt
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v5
+      - name: Restore the saved copy of the feed
+        # Only used if the live feed.json answers 404 (e.g. a Pages hiccup), so history survives.
+        uses: actions/cache/restore@v4
+        with:
+          path: .state/feed.json
+          key: owlfeed-feed-${{ github.run_id }}
+          restore-keys: owlfeed-feed-
       - name: Fetch feeds
         # The live feed.json is this run's memory of earlier items. If it cannot be read
-        # (anything other than "not found" on the very first run), the build stops and the
-        # current dashboard stays up rather than being replaced by a partial one.
+        # (anything other than "not found"), the build stops and the current dashboard stays
+        # up rather than being replaced by a partial one.
         env:
           PREVIOUS_FEED: ${{ steps.pages.outputs.base_url }}/data/feed.json
-        run: python -m owlfeed build --out site/data/feed.json --previous-url "${PREVIOUS_FEED}?run=${GITHUB_RUN_ID}"
+        run: >-
+          python -m owlfeed build --out site/data/feed.json
+          --previous-url "${PREVIOUS_FEED}?run=${GITHUB_RUN_ID}"
+          --fallback-file .state/feed.json
+      - name: Keep a copy for the next run
+        run: mkdir -p .state && cp site/data/feed.json .state/feed.json
+      - uses: actions/cache/save@v4
+        with:
+          path: .state/feed.json
+          key: owlfeed-feed-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site
+
+  deploy:
+    # Only this job can publish; it runs no repository code.
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

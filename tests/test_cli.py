@@ -119,3 +119,34 @@ def test_invalid_config_exit_code(tmp_path):
     bad = tmp_path / "sources.yml"
     bad.write_text("sources: []", encoding="utf-8")
     assert run("--sources", bad, "build", "--out", tmp_path / "feed.json") == 4
+
+
+def test_build_uses_fallback_file_when_live_feed_is_missing(sources_file, tmp_path, fake_network, monkeypatch):
+    saved = tmp_path / "saved.json"
+    run("--sources", sources_file, "--now", "2026-10-15T14:00:00Z", "build", "--out", saved)
+    monkeypatch.setattr(cli, "load_previous_url", lambda url: None)  # Pages answered 404
+    out = tmp_path / "feed.json"
+    code = run("--sources", sources_file, "--now", "2026-10-15T14:15:00Z", "build", "--out", out,
+               "--previous-url", "https://x.example/feed.json", "--fallback-file", saved)
+    assert code == 0
+    state = json.loads(out.read_text(encoding="utf-8"))
+    assert {i["first_seen"] for i in state["items"]} == {"2026-10-15T14:00:00Z"}
+
+
+def test_check_fences_feed_text_from_workflow_commands(sources_file, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(
+        cli, "fetch_all",
+        lambda sources, validators=None: {
+            s.id: FetchResult(error="HTTP 403") if s.id == "blog" else FetchResult(status=200, content=feed_bytes(FIXTURES[s.feed]))
+            for s in sources
+        },
+    )
+    run("--sources", sources_file, "check")
+    lines = capsys.readouterr().out.splitlines()
+    start = next(i for i, l in enumerate(lines) if l.startswith("::stop-commands::"))
+    token = lines[start].split("::")[2]
+    end = lines.index(f"::{token}::")
+    assert start < end
+    assert any(l.startswith("::warning title=Feed check::Example Blog (blog): HTTP 403") for l in lines[end:])
+    assert not any(l.startswith("::warning") for l in lines[start:end])
