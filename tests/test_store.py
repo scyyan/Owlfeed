@@ -196,16 +196,42 @@ def test_expired_undated_items_do_not_come_back_as_new():
     # ...but it lapses after 30 days once the feed no longer lists the item.
     later = merge(third, CONFIG, {"alpha": ok(), "bravo": ok()}, week_later + timedelta(days=31))
     assert later["expired"] == {}
-    # While the feed keeps listing it, the tombstone stays even after 30 days.
-    still_listed = merge(third, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, week_later + timedelta(days=31))
-    assert ids(still_listed) == [] and "id-nodate" in still_listed["expired"]
+    # While the feed keeps listing it, the tombstone stays even after 30 days, and its clock restarts.
+    month_later = week_later + timedelta(days=31)
+    still_listed = merge(third, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, month_later)
+    assert ids(still_listed) == [] and still_listed["expired"]["id-nodate"]["since"] == iso(month_later)
+    gap = merge(still_listed, CONFIG, {"alpha": ok(), "bravo": ok()}, month_later + timedelta(days=1))
+    assert "id-nodate" in gap["expired"]
+
+
+def test_tombstones_survive_while_a_source_is_not_reread():
+    nodate = entry("nodate", published=None)
+    first = merge(None, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, NOW)
+    expired_at = NOW + timedelta(days=8)
+    state = merge(first, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, expired_at)
+    # A month and more of 304s and failures re-reads nothing, so the tombstone must stay...
+    for day, outcome in ((20, NOT_MODIFIED), (40, failed()), (45, NOT_MODIFIED)):
+        state = merge(state, CONFIG, {"alpha": outcome, "bravo": ok()}, expired_at + timedelta(days=day))
+        assert "id-nodate" in state["expired"]
+    # ...so when the feed changes again, its old undated item does not come back as new.
+    back = expired_at + timedelta(days=50)
+    changed = merge(state, CONFIG, {"alpha": ok(nodate, entry("fresh", back)), "bravo": ok()}, back)
+    assert ids(changed) == ["id-fresh"]
 
 
 def test_malformed_tombstones_and_future_items_are_ignored():
     previous = {
         "version": 1,
         "sources": [],
-        "expired": {"x": "alpha", "y": {"source": "alpha"}, "z": ["not", "a", "dict"], 5: {}},
+        "expired": {
+            "x": "alpha",
+            "y": {"source": "alpha"},
+            "z": ["not", "a", "dict"],
+            5: {},
+            "list-source": {"source": ["alpha"], "since": iso(NOW)},
+            "dict-source": {"source": {"id": "alpha"}, "since": iso(NOW)},
+            "future": {"source": "alpha", "since": "2099-01-01T00:00:00Z"},
+        },
         "items": [
             {"id": "f", "source": "alpha", "title": "From the future", "url": "https://evil.example/f",
              "published": "2099-01-01T00:00:00Z", "first_seen": "2099-01-01T00:00:00Z"},
@@ -220,3 +246,21 @@ def test_written_feed_is_world_readable(tmp_path):
     path = tmp_path / "feed.json"
     write_state(state, path)
     assert path.stat().st_mode & 0o777 == 0o644
+
+
+def test_tombstone_dates_are_normalized_and_their_number_is_capped(monkeypatch):
+    previous = {
+        "version": 1,
+        "sources": [],
+        "items": [],
+        "expired": {"offset": {"source": "alpha", "since": "2026-10-15T16:00:00+02:00"}},
+    }
+    state = merge(previous, CONFIG, {"alpha": ok(), "bravo": ok()}, NOW)
+    assert state["expired"] == {"offset": {"source": "alpha", "since": "2026-10-15T14:00:00Z"}}
+
+    monkeypatch.setattr("owlfeed.store.MAX_TOMBSTONES", 2)
+    previous["expired"] = {
+        f"t{n}": {"source": "alpha", "since": iso(NOW - timedelta(days=n))} for n in range(5)
+    }
+    state = merge(previous, CONFIG, {"alpha": ok(), "bravo": ok()}, NOW)
+    assert sorted(state["expired"]) == ["t0", "t1"]

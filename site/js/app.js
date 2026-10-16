@@ -329,8 +329,15 @@ function renderFeed() {
   renderActiveFilters(list.length);
   if (!list.length) {
     feedRenderer.render([], renderContext());
-    $('feed').replaceChildren(emptyStateFor());
+    const empty = emptyStateFor();
+    $('feed').replaceChildren(empty);
     $('sentinel').hidden = true;
+    if (focus) {
+      // The focused item was the last one in this view: keep focus (and screen readers) in the feed.
+      const target = empty.querySelector('[data-empty-action]') ?? empty;
+      if (target === empty) empty.tabIndex = -1;
+      target.focus({ preventScroll: true });
+    }
     return;
   }
   feedRenderer.render(list, renderContext());
@@ -512,7 +519,7 @@ function filtersChanged() {
   scrollToFeedTop();
 }
 
-function resetFilters() {
+function resetFilters(event) {
   state.prefs.hiddenCategories = [];
   state.prefs.hiddenSources = [];
   state.prefs.view = 'all';
@@ -520,7 +527,10 @@ function resetFilters() {
   state.tokens = [];
   $('search').value = '';
   filtersChanged();
-  $('search').focus({ preventScroll: true }); // the Clear button that had focus is gone
+  // The Clear button that had focus is gone. From the keyboard, continue in the search box; after a
+  // tap or click, go to the newest item instead, so no on-screen keyboard pops up over the feed.
+  if (event?.detail === 0) $('search').focus({ preventScroll: true });
+  else focusFirstItem();
 }
 
 function articleFor(id) {
@@ -748,7 +758,7 @@ function wireEvents() {
   const feed = $('feed');
   feed.addEventListener('click', (event) => {
     if (event.target.closest('[data-empty-action]')) {
-      resetFilters();
+      resetFilters(event);
       return;
     }
     const article = event.target.closest('article[data-id]');
@@ -769,7 +779,7 @@ function wireEvents() {
   });
 
   $('active-filters').addEventListener('click', (event) => {
-    if (event.target.closest('[data-empty-action]')) resetFilters();
+    if (event.target.closest('[data-empty-action]')) resetFilters(event);
   });
   $('mark-all-read').addEventListener('click', markAllRead);
   $('theme-btn').addEventListener('click', toggleTheme);

@@ -39,15 +39,21 @@ jobs:
         uses: actions/configure-pages@v5
       - name: Restore the saved copy of the feed
         # Only used if the live feed.json answers 404 (e.g. a Pages hiccup), so history survives.
-        # It comes from this workflow's own last successful run on main, which nothing else can write.
+        # It comes from this workflow's own last successful scheduled or push run on main: those
+        # always run main's own code (a manual run can be started from any ref). Best effort: if
+        # the lookup fails, the run carries on without it.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow refresh.yml --branch main \
-            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            --status success --limit 20 --json databaseId,event \
+            --jq '[.[] | select(.event == "schedule" or .event == "push")][0].databaseId // empty') \
+            || { echo "::warning::Could not look up the last refresh; continuing without a saved feed"; run_id=""; }
           if [ -n "${run_id}" ]; then
-            gh run download "${run_id}" --repo "$GITHUB_REPOSITORY" --name feed-state --dir .state \
-              || echo "Run ${run_id} has no saved feed; continuing without one"
+            if ! gh run download "${run_id}" --repo "$GITHUB_REPOSITORY" --name feed-state --dir .state; then
+              rm -rf .state  # never use a partial download
+              echo "Run ${run_id} has no saved feed; continuing without one"
+            fi
           else
             echo "No earlier successful refresh; continuing without a saved feed"
           fi

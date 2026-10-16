@@ -651,6 +651,7 @@ input {
   color: var(--bg);
   font-size: 13.5px;
   box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  pointer-events: none; /* never blocks a tap on the buttons beneath it */
 }
 
 .loading {
@@ -856,6 +857,7 @@ mark {
 
 .empty {
   margin-top: 40px;
+  outline-offset: 4px;
   padding: 36px 24px;
   border: 1px dashed var(--border);
   border-radius: var(--radius);

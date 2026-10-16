@@ -216,3 +216,60 @@ def test_double_escaped_html_with_block_tags_and_tag_mentions():
     escaped = "&lt;section&gt;&lt;p&gt;The kit injects a &lt;script&gt; loader into checkout pages.&lt;/p&gt;&lt;/section&gt;"
     # The re-parse keeps every word; only the (double-escaped) tag itself disappears.
     assert summary_text(escaped) == "The kit injects a loader into checkout pages."
+
+
+def test_double_escaped_captions_scripts_and_styles_are_skipped():
+    lead = "Russian missiles struck the port of Odesa overnight, killing two people."
+    for block in (
+        "&lt;figure&gt;&lt;img src='x.jpg'&gt;&lt;figcaption&gt;Firefighters at the port after the strike "
+        "(source: regional administration)&lt;/figcaption&gt;&lt;/figure&gt;",
+        "&lt;script&gt;window.dataLayer.push({event: 'view'});&lt;/script&gt;",
+        "&lt;style&gt;.wp-block-image{margin:0 auto;color:red}&lt;/style&gt;",
+        "&lt;noscript&gt;Please enable JavaScript to view the interactive map of the strikes.&lt;/noscript&gt;",
+    ):
+        assert summary_text(f"{block}&lt;p&gt;{lead}&lt;/p&gt;") == lead
+        assert summary_text(f"&lt;p&gt;{lead}&lt;/p&gt;{block}") == lead
+
+
+def test_single_escaped_tag_and_comment_mentions_keep_their_words():
+    for text in (
+        "Attackers can inject a <pre> block into the signature field, and the server echoes it back.",
+        "The update wraps the content in a <main> element and adds landmarks for screen readers.",
+        "The phishing kit hides its configuration in an <!-- HTML comment --> near the end of the page.",
+        "Attackers prepend <!-- to the payload, which disables the filter in older browsers.",
+    ):
+        escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        assert summary_text(f"<p>{escaped}</p>") == text
+    assert clean_title("Bug lets a &lt;section&gt; element escape the sandbox") == "Bug lets a <section> element escape the sandbox"
+    assert clean_title("Browsers now treat &lt;!-- inside scripts differently") == "Browsers now treat <!-- inside scripts differently"
+    # A double-escaped comment in front of real markup is still removed.
+    assert summary_text("&lt;!-- wp:paragraph --&gt;&lt;p&gt;Officials confirmed the outage on Friday.&lt;/p&gt;") == (
+        "Officials confirmed the outage on Friday."
+    )
+
+
+def test_plain_titles_drop_stray_breaks_and_images():
+    assert clean_title("Breaking:<br />Ransomware hits hospital chain", plain=True) == "Breaking: Ransomware hits hospital chain"
+    assert clean_title('<img src="x.png" alt="">Patch now', plain=True) == "Patch now"
+    assert clean_title("How <script> tags hide malware", plain=True) == "How <script> tags hide malware"
+
+
+def test_truncate_keeps_initials_after_acronyms_and_cuts_before_product_names():
+    text = (
+        "The company confirmed the breach on Tuesday in a statement from its CEO J. Smith, who said customer "
+        "data had been accessed by the intruders."
+    )
+    assert truncate(text, 100).endswith("…") and "J. Smith" in truncate(text, 100)
+    text = "Apple has released emergency updates for two flaws. iOS 18.1 and macOS 15.1 address both of them in WebKit."
+    assert truncate(text, 80) == "Apple has released emergency updates for two flaws."
+    text = "Microsoft fixed a zero-day in its October Patch Tuesday release. npm packages were also hit this week."
+    assert truncate(text, 90) == "Microsoft fixed a zero-day in its October Patch Tuesday release."
+    text = "Researchers led by Smith et al. found that the malware spread through several hundred routers."
+    assert "et al. found" in truncate(text, 70)
+    text = "Clashes continued overnight in the west of the country. eSwatini and its neighbours closed borders."
+    assert truncate(text, 60) == "Clashes continued overnight in the west of the country."
+    text = "Officials described the attack in the west of the U.S. with the most recent waves"
+    assert truncate(text, 58) == "Officials described the attack in the west of the U.S…"  # never ".…"
+    assert truncate("The group known as APT X. Officials said the campaign targeted ministries across Europe.", 40) == (
+        "The group known as APT X."
+    )

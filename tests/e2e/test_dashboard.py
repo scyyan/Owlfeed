@@ -327,10 +327,19 @@ def test_drawer_is_modal_on_phones(make_page, server):
 
 def test_restore_is_keyboard_operable(page, server):
     open_dashboard(page, server)
+    # Count requests to open the file picker. (Whether a headless browser then reports a native
+    # chooser for keyboard activation differs between builds; a click opening it is covered by
+    # test_restore_from_the_phone_drawer_is_announced.)
+    page.evaluate(
+        "window.__pickerRequests = 0;"
+        "document.getElementById('import-input').addEventListener('click', (event) => {"
+        "  window.__pickerRequests++; event.preventDefault(); })"
+    )
     page.locator("#import-btn").focus()
-    with page.expect_file_chooser() as chooser:
-        page.keyboard.press("Enter")
-    assert chooser.value is not None
+    page.keyboard.press("Enter")
+    page.keyboard.press("Space")
+    wait_until(page, "window.__pickerRequests === 2")
+    assert page.evaluate("document.activeElement.id") == "import-btn"
 
 
 def test_restarring_an_aged_out_saved_item(page, server):
@@ -430,3 +439,40 @@ def test_clearing_search_with_escape_returns_to_the_newest_items(make_page, serv
     page.get_by_role("searchbox").press("Escape")
     wait_until(page, "window.scrollY === 0")
     expect(page.locator("article.item")).to_have_count(len(ITEMS))
+
+
+def test_focus_stays_in_the_feed_when_its_last_item_goes(make_page, server):
+    page = make_page()
+    page.clock.install(time=NOW)
+    open_dashboard(page, server)
+    page.get_by_role("searchbox").fill('"Advisory: Critical flaw"')
+    expect(page.locator("article.item")).to_have_count(1)
+    item(page, "Advisory: Critical flaw").get_by_role("button", name="Save for later").focus()
+    feed = build_feed(generated_at=NOW + timedelta(minutes=5))
+    feed["items"] = [i for i in feed["items"] if i["id"] != "i03"]
+    server.write_feed(feed)
+    page.clock.run_for(5 * 60_000 + 1_000)
+    expect(page.get_by_text("Nothing matches these filters")).to_be_visible()
+    assert page.evaluate("document.activeElement.dataset.emptyAction") == "clear"
+
+
+def test_clear_filters_focus_depends_on_how_it_was_pressed(page, server):
+    open_dashboard(page, server)
+    search = page.get_by_role("searchbox")
+    search.fill("no such thing")
+    page.get_by_role("button", name="Clear filters").click()
+    expect(page.locator("article.item")).to_have_count(len(ITEMS))
+    # A tap or click goes to the newest item, so no on-screen keyboard opens over the feed...
+    assert page.evaluate("document.activeElement.closest('.item-title') !== null")
+    assert page.evaluate("document.activeElement.closest('article').dataset.id") == "i01"
+    # ...while the keyboard continues in the search box.
+    search.fill("no such thing")
+    page.get_by_role("button", name="Clear filters").press("Enter")
+    expect(page.locator("article.item")).to_have_count(len(ITEMS))
+    assert page.evaluate("document.activeElement.id") == "search"
+
+
+def test_toast_never_blocks_taps(page, server):
+    open_dashboard(page, server)
+    page.evaluate("document.getElementById('status').hidden = false")
+    assert page.evaluate("getComputedStyle(document.getElementById('status')).pointerEvents") == "none"

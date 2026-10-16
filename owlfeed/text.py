@@ -21,20 +21,27 @@ HEADING_MAX_CHARS = 40
 
 _WHITESPACE = re.compile(r"\s+")
 _LEFTOVER_ENTITY = re.compile(r"&(?:#\d{1,7}|#x[0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});")
-# Real markup that survived a first decoding pass, i.e. double-escaped HTML ("&lt;p&gt;").
-# Only common content tags count, so a headline about "<script>" tags keeps its text.
-_ESCAPED_MARKUP = re.compile(
-    r"<!--|</?(?:p|div|span|a|em|strong|b|i|u|ul|ol|li|h[1-6]|br|hr|figure|img|blockquote|table|tbody|tr|td|th"
-    r"|section|article|aside|header|footer|main|nav|pre|dl|dt|dd)(?:\s[^<>]*)?/?>",
-    re.IGNORECASE,
+# Real markup that survived a first decoding pass, i.e. double-escaped HTML ("&lt;p&gt;…&lt;/p&gt;").
+# Only common content tags count, and a paragraph is parsed again only when it opens with such a tag
+# (or a complete comment) or closes one, so prose that names a tag ("inject a <pre> block",
+# "an <!-- HTML comment -->", "How <script> tags hide malware") keeps its words.
+_CONTENT_TAGS = (
+    r"(?:p|div|span|a|em|strong|b|i|u|ul|ol|li|h[1-6]|br|hr|figure|img|blockquote|table|tbody|tr|td|th"
+    r"|section|article|aside|header|footer|main|nav|pre|dl|dt|dd)"
 )
+_ESCAPED_OPENING = re.compile(rf"<!--.*?-->|<{_CONTENT_TAGS}(?:\s[^<>]*)?/?>", re.IGNORECASE | re.DOTALL)
+_ESCAPED_CLOSING = re.compile(rf"</{_CONTENT_TAGS}\s*>", re.IGNORECASE)
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]?(?=\s)")
 # A period after these is not a sentence end: "U.S.", "J. Smith", "Gen. Smith", "Oct. 12", "3 a.m.".
-# A lone capital counts only when it is not part of a name like "AT&T" or "APT X".
+# A lone capital counts only when it is not part of a name like "AT&T" or "APT X" ("CEO J. Smith" does).
 _ABBREVIATION = re.compile(
-    r"(?:(?<![&\w])(?<![A-Z]{2} )[A-Z]|\b(?:Mr|Mrs|Ms|Dr|Prof|St|Mt|Inc|Ltd|Co|Corp|Gen|Gov|Sen|Rep|Lt|Col|Sgt|Capt"
+    r"(?:(?<![&\w])(?<!\bAPT )[A-Z]|\b(?:Mr|Mrs|Ms|Dr|Prof|St|Mt|Inc|Ltd|Co|Corp|Gen|Gov|Sen|Rep|Lt|Col|Sgt|Capt"
     r"|Adm|Maj|Brig|Dept|Jr|Sr|No|vs|etc|approx|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec|e\.g|i\.e|a\.m|p\.m))\.$"
 )
+# "3 a.m. local time", "Smith et al. found": a short or dotted lowercase word before the period.
+_LOWERCASE_ABBREVIATION = re.compile(r"(?:\b[a-z]{1,3}|\.[a-z])\.$")
+_PLAIN_TITLE_BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_PLAIN_TITLE_IMAGE = re.compile(r"<img\b[^<>]*>", re.IGNORECASE)
 _TERMINAL = re.compile(r"[.!?…:;\"'”’)\]]$")
 
 # Whole (short) paragraphs that are never part of an article's summary.
@@ -90,13 +97,13 @@ _PUNCTUATED_ELLIPSIS = re.compile(r"([.!?])\s*…$")
 class _ParagraphExtractor(HTMLParser):
     """Collects text, starting a new paragraph at every block-level boundary."""
 
-    def __init__(self, skip_tags: frozenset[str] = SKIP_TAGS) -> None:
+    def __init__(self, skip_tags: frozenset[str] = SKIP_TAGS, raw_text: bool = True) -> None:
         super().__init__(convert_charrefs=True)
         self.paragraphs: list[str] = []
         self._buffer: list[str] = []
         self._skip_depth = 0
         self._skip_tags = skip_tags
-        if not skip_tags:
+        if not raw_text:
             # Treat <script>/<style> (and, on newer Pythons, <textarea>/<title>) as ordinary tags, not as
             # raw-text containers, so text after a mentioned "<script>" is still parsed normally.
             self.CDATA_CONTENT_ELEMENTS = ()
@@ -137,8 +144,8 @@ def collapse_whitespace(text: str) -> str:
     return _WHITESPACE.sub(" ", text.replace(" ", " ")).strip()
 
 
-def _parse_paragraphs(value: str, skip_tags: frozenset[str] = SKIP_TAGS) -> list[str]:
-    parser = _ParagraphExtractor(skip_tags)
+def _parse_paragraphs(value: str, skip_tags: frozenset[str] = SKIP_TAGS, raw_text: bool = True) -> list[str]:
+    parser = _ParagraphExtractor(skip_tags, raw_text)
     parser.feed(value)
     parser.close()
     # Some feeds double-escape entities (e.g. "&amp;#8217;"); decode the leftovers once more.
@@ -153,10 +160,12 @@ def html_to_paragraphs(value: object) -> list[str]:
         return [collapse_whitespace(value)]
     paragraphs = []
     for paragraph in _parse_paragraphs(value):
-        # Double-escaped HTML ("&lt;p&gt;") only becomes markup after the first pass. Nothing is skipped
-        # on this pass, so prose that mentions "<script>" next to real markup keeps its words.
-        if _ESCAPED_MARKUP.search(paragraph):
-            paragraphs.extend(_parse_paragraphs(paragraph, frozenset()))
+        # Double-escaped HTML ("&lt;p&gt;") only becomes markup after the first pass. On this pass only
+        # captions, scripts, styles and the like that really close are skipped, so prose that mentions
+        # "<script>" next to real markup keeps the words after it.
+        if _ESCAPED_OPENING.match(paragraph) or _ESCAPED_CLOSING.search(paragraph):
+            closed = frozenset(t for t in SKIP_TAGS if re.search(rf"</{t}\s*>", paragraph, re.IGNORECASE))
+            paragraphs.extend(_parse_paragraphs(paragraph, closed, raw_text=False))
         else:
             paragraphs.append(paragraph)
     return [p for p in paragraphs if p]
@@ -170,7 +179,9 @@ def html_to_text(value: object) -> str:
 def clean_title(value: object, max_chars: int = 300, plain: bool = False) -> str:
     """plain=True for titles the feed marks as plain text: they are decoded already, not HTML."""
     if plain and isinstance(value, str):
-        text = collapse_whitespace(_LEFTOVER_ENTITY.sub(lambda m: unescape(m.group(0)), value))
+        # Stray line breaks and images still show up in some plain titles; tag names in words stay.
+        text = _PLAIN_TITLE_BREAK.sub(" ", _PLAIN_TITLE_IMAGE.sub("", value))
+        text = collapse_whitespace(_LEFTOVER_ENTITY.sub(lambda m: unescape(m.group(0)), text))
     else:
         text = html_to_text(value)
     return truncate(_TITLE_DATE_SUFFIX.sub("", text), max_chars)
@@ -216,15 +227,15 @@ def truncate(text: str, max_chars: int) -> str:
             continue
         if _ABBREVIATION.search(text[: match.start() + 1]):
             continue
-        if text[match.end():].lstrip()[:1].islower():
-            continue  # "…shortly after 3 a.m. local time": the sentence goes on
+        if text[match.end():].lstrip()[:1].islower() and _LOWERCASE_ABBREVIATION.search(text[: match.start() + 1]):
+            continue  # "…et al. found": the sentence goes on (but "…the flaw. iOS 18.1 fixes…" ends one)
         cut = match.end()
     if cut:
         return text[:cut].rstrip()
     space = window.rfind(" ", 0, max_chars)
     if space < max_chars // 2:
         space = max_chars - 1
-    return text[:space].rstrip(" ,;:-–—(") + "…"
+    return text[:space].rstrip(" ,;:-–—(.") + "…"
 
 
 def _candidates(entry: dict, mode: str) -> list[str]:

@@ -163,6 +163,14 @@ def test_plain_text_titles_keep_tag_mentions():
     assert entry.summary.startswith("Researchers found")
 
 
+def test_plain_text_titles_drop_stray_line_breaks():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>T</title><link>https://t.example/</link>
+    <item><title>Breaking:&lt;br /&gt;Ransomware hits hospital chain</title><link>https://t.example/1</link></item>
+    </channel></rss>"""
+    (entry,) = parse_feed(feed, make_source("t"), Settings(), NOW)
+    assert entry.title == "Breaking: Ransomware hits hospital chain"
+
+
 def test_published_date_wins_over_a_zone_less_update():
     feed = b"""<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>A</title>
     <entry><title>Edited later</title><link href="https://a.example/1"/><id>x</id>

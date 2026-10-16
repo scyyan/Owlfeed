@@ -20,8 +20,10 @@ from .parse import Entry
 
 SCHEMA_VERSION = 1
 MAX_ITEMS = 6000
-# Expired undated items are remembered this long (or for as long as their feed still lists them).
+# Expired undated items are remembered this long after their feed last listed them.
 TOMBSTONE_DAYS = 30
+# Far more than the feeds can list at once; only bounds a corrupt or injected restored state.
+MAX_TOMBSTONES = 5000
 # Restored items dated later than this are corrupt (or injected) and are dropped.
 FUTURE_TOLERANCE = timedelta(minutes=10)
 
@@ -147,13 +149,11 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
     raw_expired = (previous or {}).get("expired")
     expired_before: dict[str, dict] = {}
     for item_id, mark in (raw_expired.items() if isinstance(raw_expired, dict) else []):
-        if (
-            isinstance(item_id, str)
-            and isinstance(mark, dict)
-            and mark.get("source") in enabled_ids
-            and parse_iso(mark.get("since")) is not None
-        ):
-            expired_before[item_id] = {"source": mark["source"], "since": mark["since"]}
+        if not (isinstance(item_id, str) and isinstance(mark, dict)):
+            continue
+        source_id, since = mark.get("source"), parse_iso(mark.get("since"))
+        if isinstance(source_id, str) and source_id in enabled_ids and since and since <= now + FUTURE_TOLERANCE:
+            expired_before[item_id] = {"source": source_id, "since": iso(since)}
 
     merged: dict[str, dict] = {}
     for raw in (previous or {}).get("items", []):
@@ -201,13 +201,20 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
     tombstone_cutoff = iso(now - timedelta(days=TOMBSTONE_DAYS))
     expired: dict[str, dict] = {}
     for item_id, mark in expired_before.items():
-        # Kept while recent, or while the feed still lists the item; one short or empty response
-        # from a source therefore cannot bring its old undated items back as "new".
-        if mark["since"] >= tombstone_cutoff or item_id in fresh_ids.get(mark["source"], ()):
+        listed = fresh_ids.get(mark["source"])
+        if listed is not None and item_id in listed:
+            # Still in the feed: the 30 days count from the last time it was listed.
+            expired[item_id] = {"source": mark["source"], "since": now_iso}
+        elif listed is None or mark["since"] >= tombstone_cutoff:
+            # Kept while the source was not re-read (304 or error), so a feed that stops changing
+            # or fails for a month cannot bring its old undated items back as "new" afterwards.
             expired[item_id] = mark
     for item in merged.values():
         if item["published"] < cutoff and item["date_estimated"] and item["id"] not in expired:
             expired[item["id"]] = {"source": item["source"], "since": now_iso}
+    if len(expired) > MAX_TOMBSTONES:
+        newest = sorted(expired.items(), key=lambda pair: pair[1]["since"], reverse=True)
+        expired = dict(newest[:MAX_TOMBSTONES])
     items.sort(key=lambda item: item["title"].casefold())
     items.sort(key=lambda item: (item["published"], item["first_seen"]), reverse=True)
     items = items[:MAX_ITEMS]
