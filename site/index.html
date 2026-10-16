@@ -60,15 +60,15 @@
         <div id="source-health" class="health"></div>
         <div class="side-actions">
           <button class="link-btn" id="export-btn" type="button">Back up settings</button>
-          <label class="link-btn" for="import-input">Restore</label>
-          <input id="import-input" type="file" accept="application/json,.json" hidden>
+          <button class="link-btn" id="import-btn" type="button">Restore</button>
+          <input id="import-input" type="file" accept="application/json,.json" hidden tabindex="-1">
         </div>
         <p class="hint">Watchlist, read and saved items are stored only in this browser. Back them up to move them to another device.</p>
       </footer>
     </aside>
     <div class="scrim" id="scrim" hidden></div>
 
-    <main class="main">
+    <main class="main" id="main">
       <header class="topbar">
         <button class="icon-btn menu-btn" id="menu-btn" type="button" aria-label="Open views and filters" aria-controls="sidebar" aria-expanded="false">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
@@ -90,9 +90,11 @@
       </header>
 
       <div class="content">
+        <p class="stale-banner" id="stale-banner" role="alert" hidden></p>
         <div class="active-filters" id="active-filters" hidden></div>
         <button class="new-pill" id="new-pill" type="button" hidden></button>
-        <div class="status" id="status" role="status" aria-live="polite" hidden></div>
+        <div class="status" id="status" aria-hidden="true" hidden></div>
+        <div class="sr-only" id="announcer" role="status" aria-live="polite"></div>
         <div class="feed" id="feed" aria-busy="true">
           <p class="loading">Loading the latest intelligence…</p>
         </div>

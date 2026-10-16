@@ -304,7 +304,8 @@ export function renderWatchTerms(list, terms) {
   );
 }
 
-export function renderHealth(container, sources, now) {
+/** options.open keeps the failing-sources list expanded across re-renders; options.updated is shown too. */
+export function renderHealth(container, sources, now, { open = false, updated = '', stale = false } = {}) {
   const failing = sources.filter((s) => s.status !== 'ok');
   const summary = el('p', 'health-summary');
   summary.append(
@@ -312,8 +313,10 @@ export function renderHealth(container, sources, now) {
     `${sources.length - failing.length} of ${sources.length} sources OK`,
   );
   const nodes = [summary];
+  if (updated) nodes.push(el('p', `health-updated${stale ? ' is-stale' : ''}`, updated));
   if (failing.length) {
     const details = el('details', 'health-details');
+    details.open = open;
     details.append(el('summary', null, `${failing.length} failing`));
     const list = el('ul');
     for (const source of failing) {

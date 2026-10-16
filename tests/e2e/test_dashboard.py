@@ -249,3 +249,143 @@ def test_backup_and_restore(page, server, tmp_path):
     page.locator("#import-input").set_input_files(str(backup))
     expect(page.locator(".chip-label")).to_have_text(["Examplia"])
     expect(page.locator("#status")).to_contain_text("1 watchlist terms added")
+
+
+def hide_and_show(page, away_ms):
+    """Simulate switching away from the tab for away_ms (needs page.clock.install)."""
+    page.evaluate(
+        "Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => 'hidden'});"
+        "document.dispatchEvent(new Event('visibilitychange'))"
+    )
+    page.clock.run_for(away_ms)
+    page.evaluate(
+        "Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => 'visible'});"
+        "document.dispatchEvent(new Event('visibilitychange'))"
+    )
+
+
+def test_two_tabs_merge_and_sync(make_page, server):
+    tab_a = make_page()
+    tab_a.clock.set_fixed_time(NOW)
+    open_dashboard(tab_a, server)
+    tab_b = tab_a.context.new_page()
+    tab_b.clock.set_fixed_time(NOW)
+    open_dashboard(tab_b, server)
+
+    item(tab_a, "Supply chain intrusion").get_by_role("button", name="Save for later").click()
+    item(tab_b, "Regional summit").get_by_role("button", name="Save for later").click()
+    # Tab A hears about tab B's change without reloading.
+    expect(item(tab_a, "Regional summit").locator(".btn-save")).to_have_attribute("aria-pressed", "true")
+    expect(tab_a.locator('[data-view="saved"] .count')).to_have_text("2")
+    tab_a.reload()
+    expect(tab_a.locator('[data-view="saved"] .count')).to_have_text("2")
+
+
+def test_last_visit_is_the_feed_build_that_was_seen(make_page, server):
+    built = NOW - timedelta(minutes=10)
+    server.write_feed(build_feed(generated_at=built))
+    page = make_page()
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    page.goto("about:blank")  # leaving the page records the visit
+    check = page.context.new_page()
+    check.goto(server.url)
+    assert check.evaluate("JSON.parse(localStorage.getItem('owlfeed:v1:lastVisit'))") == iso(built)
+
+
+def test_new_badges_reset_after_a_long_absence(make_page, server):
+    page = make_page()
+    set_last_visit(page, iso(NOW - timedelta(minutes=100)))
+    page.clock.install(time=NOW)
+    open_dashboard(page, server)
+    expect(page.locator(".badge-new")).to_have_count(3)
+    hide_and_show(page, 5 * 60_000)  # a short break keeps the same visit
+    expect(page.locator(".badge-new")).to_have_count(3)
+    hide_and_show(page, 31 * 60_000)  # a long one starts a new visit: everything was seen
+    expect(page.locator(".badge-new")).to_have_count(0)
+    expect(page.locator("#new-chip")).to_be_hidden()
+
+
+def test_drawer_is_modal_on_phones(make_page, server):
+    page = make_page(viewport=(390, 844))
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    assert page.evaluate("document.getElementById('sidebar').inert") is True
+    page.get_by_role("button", name="Open views and filters").click()
+    assert page.evaluate("document.activeElement.id") == "sidebar-close"
+    assert page.evaluate("document.getElementById('main').inert") is True
+    assert page.evaluate("document.getElementById('sidebar').inert") is False
+    page.keyboard.press("Escape")
+    assert page.evaluate("document.activeElement.id") == "menu-btn"
+    assert page.evaluate("document.getElementById('sidebar').inert") is True
+
+    page.get_by_role("button", name="Open views and filters").click()
+    page.set_viewport_size({"width": 1280, "height": 900})  # rotating to a wide screen closes it
+    wait_until(page, "!document.body.classList.contains('drawer-open')")
+    assert page.evaluate("document.getElementById('main').inert || document.getElementById('sidebar').inert") is False
+
+
+def test_restore_is_keyboard_operable(page, server):
+    open_dashboard(page, server)
+    page.locator("#import-btn").focus()
+    with page.expect_file_chooser() as chooser:
+        page.keyboard.press("Enter")
+    assert chooser.value is not None
+
+
+def test_restarring_an_aged_out_saved_item(page, server):
+    open_dashboard(page, server)
+    item(page, "Weekly vulnerability summary").get_by_role("button", name="Save for later").click()
+    feed = build_feed()
+    feed["items"] = [i for i in feed["items"] if i["id"] != "i09"]
+    server.write_feed(feed)
+    page.reload()
+    page.locator('[data-view="saved"]').click()
+    saved = item(page, "Weekly vulnerability summary")
+    saved.get_by_role("button", name="Remove from saved").click()
+    saved.get_by_role("button", name="Save for later").click()
+    expect(saved.locator(".btn-save")).to_have_attribute("aria-pressed", "true")
+    page.reload()
+    expect(page.locator(TITLES)).to_have_text(["Weekly vulnerability summary"])
+
+
+def test_arrivals_hidden_by_filters_are_not_announced(make_page, server):
+    page = make_page()
+    page.clock.install(time=NOW)
+    open_dashboard(page, server)
+    page.get_by_role("checkbox", name="Geopolitics").uncheck()
+    server.write_feed(build_feed(extra_items=[breaking_item()], generated_at=NOW + timedelta(minutes=5)))
+    page.clock.run_for(5 * 60_000 + 1_000)
+    expect(page.locator("#updated")).to_have_text("Updated just now")  # the refresh was applied
+    expect(page.locator("#status")).to_be_hidden()
+    expect(page.get_by_text("Breaking: sample item")).to_have_count(0)
+
+
+def test_auto_refresh_keeps_keyboard_focus(make_page, server):
+    page = make_page()
+    page.clock.install(time=NOW)
+    open_dashboard(page, server)
+    item(page, "Advisory: Critical flaw").get_by_role("button", name="Save for later").focus()
+    server.write_feed(build_feed(extra_items=[breaking_item()], generated_at=NOW + timedelta(minutes=5)))
+    page.clock.run_for(5 * 60_000 + 1_000)
+    expect(item(page, "Breaking: sample item")).to_be_visible()
+    focused = page.evaluate("[document.activeElement.dataset.action, document.activeElement.closest('article')?.dataset.id]")
+    assert focused == ["save", "i03"]
+
+
+def test_empty_state_explains_filters(page, server):
+    open_dashboard(page, server)
+    item(page, "Supply chain intrusion").get_by_role("button", name="Save for later").click()
+    page.locator('[data-view="saved"]').click()
+    page.get_by_role("searchbox").fill("no such thing")
+    expect(page.get_by_text("Nothing matches these filters")).to_be_visible()
+    expect(page.get_by_text("Nothing saved yet")).to_have_count(0)
+
+
+def test_stale_banner_shows_on_phones(make_page, server):
+    server.write_feed(build_feed(generated_at=NOW - timedelta(hours=3)))
+    page = make_page(viewport=(390, 844))
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    expect(page.locator("#stale-banner")).to_be_visible()
+    expect(page.locator("#stale-banner")).to_contain_text("last updated 3 hours ago")

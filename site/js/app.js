@@ -10,11 +10,14 @@ const FEED_URL = 'data/feed.json';
 const POLL_MS = 5 * 60_000;
 const TICK_MS = 30_000;
 const STALE_MS = 60 * 60_000;
+// Away from the tab for this long (or a reload after this long) starts a new "visit".
+const VISIT_GAP_MS = 30 * 60_000;
 const AT_TOP_PX = 200;
-const BASELINE_KEY = 'owlfeed:v1:baseline';
+const SESSION_KEY = 'owlfeed:v1:visit';
 
 const $ = (id) => document.getElementById(id);
 const storage = createStorage();
+const narrow = window.matchMedia('(max-width: 900px)');
 
 const state = {
   data: null,
@@ -28,39 +31,68 @@ const state = {
   matcher: null,
   query: '',
   tokens: [],
-  baseline: initBaseline(),
+  baseline: NaN, // generated_at (server time) of the newest build seen before this visit
+  seenGeneratedAt: null, // generated_at of the newest build shown while the page was visible
+  hiddenAt: null,
   pending: null,
   lastFetch: 0,
   retryTimer: null,
 };
 if (!VIEWS.includes(state.prefs.view)) state.prefs.view = 'all';
 
+// Snapshots of items un-starred this session, so starring one again still works after it
+// has dropped out of the feed.
+const unsavedSnapshots = new Map();
+
 const feedRenderer = ui.createFeedRenderer($('feed'), $('sentinel'));
 
-// ── Baseline for "new since your last visit" ────────────────────────────────
-// The baseline is fixed for the whole tab session (so reloads keep the badges);
-// lastVisit is updated whenever the page is hidden or closed.
-function initBaseline() {
-  let baseline = null;
+// ── Visits and "new since last visit" ───────────────────────────────────────
+// NEW means: first seen by the fetcher after the newest feed build this reader had on screen
+// when they last left. Both sides are server timestamps, so client clocks and deploy lag
+// don't matter, and items held behind the "new items" pill don't count as seen.
+function readSession() {
   try {
-    baseline = sessionStorage.getItem(BASELINE_KEY);
+    const value = JSON.parse(sessionStorage.getItem(SESSION_KEY));
+    return value && typeof value.at === 'number' ? value : null;
   } catch {
-    baseline = null;
+    return null;
   }
-  if (!baseline) {
-    baseline = storage.lastVisit() || new Date().toISOString();
-    try {
-      sessionStorage.setItem(BASELINE_KEY, baseline);
-    } catch {
-      // sessionStorage unavailable: badges simply reset on reload.
-    }
+}
+
+function writeSession() {
+  try {
+    const baseline = Number.isFinite(state.baseline) ? new Date(state.baseline).toISOString() : null;
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ baseline, at: Date.now() }));
+  } catch {
+    // sessionStorage unavailable: a reload simply starts a new visit.
   }
-  return parseTime(baseline);
+}
+
+function startVisit() {
+  storage.invalidate('lastVisit');
+  state.baseline = parseTime(storage.lastVisit()); // NaN on a first visit: set from the first data
+  writeSession();
+}
+
+function initVisit() {
+  const session = readSession();
+  if (session && Date.now() - session.at < VISIT_GAP_MS) {
+    state.baseline = parseTime(session.baseline); // a reload keeps this visit's NEW badges
+  } else {
+    startVisit();
+  }
+}
+
+function markSeen() {
+  if (state.data && document.visibilityState === 'visible') state.seenGeneratedAt = state.data.generated_at;
 }
 
 function rememberVisit() {
-  storage.setLastVisit(new Date().toISOString());
+  if (state.seenGeneratedAt) storage.advanceLastVisit(state.seenGeneratedAt);
+  writeSession();
 }
+
+const isNew = (item) => Number.isFinite(state.baseline) && item.firstSeenMs > state.baseline;
 
 // ── Data ────────────────────────────────────────────────────────────────────
 /** Items we can show: an id, a title, an http(s) link and a valid date. */
@@ -74,12 +106,12 @@ function isUsable(raw) {
   );
 }
 
-function enrich(raw) {
+function enrich(raw, sourcesById = state.sourcesById) {
   if (!isUsable(raw)) return null;
   const url = ui.safeUrl(raw.url);
   const publishedMs = parseTime(raw.published);
   const firstSeenMs = parseTime(raw.first_seen);
-  const source = state.sourcesById.get(raw.source);
+  const source = sourcesById.get(raw.source);
   const sourceName = source?.name ?? raw.sourceName ?? raw.source ?? 'Unknown source';
   const summary = typeof raw.summary === 'string' ? raw.summary : '';
   return {
@@ -99,6 +131,12 @@ function enrich(raw) {
   };
 }
 
+function sourcesFrom(data) {
+  return (Array.isArray(data.sources) ? data.sources : []).filter(
+    (s) => s && typeof s.id === 'string' && typeof s.name === 'string',
+  );
+}
+
 function applyWatch(items) {
   for (const item of items) item.watch = state.matcher ? state.matcher.match(item.title, item.summary) : [];
 }
@@ -112,14 +150,18 @@ function applyData(data) {
   state.data = data;
   state.pending = null;
   $('new-pill').hidden = true;
-  state.sources = (Array.isArray(data.sources) ? data.sources : []).filter(
-    (s) => s && typeof s.id === 'string' && typeof s.name === 'string',
-  );
+  state.sources = sourcesFrom(data);
   state.sourcesById = new Map(state.sources.map((s) => [s.id, s]));
   state.categories = [...new Set(state.sources.map((s) => s.category))];
-  state.items = sortItems(data.items.map(enrich).filter(Boolean));
+  state.items = sortItems(data.items.map((raw) => enrich(raw)).filter(Boolean));
   state.itemsById = new Map(state.items.map((item) => [item.id, item]));
+  if (!Number.isFinite(state.baseline)) {
+    // First visit: everything already published counts as seen; later arrivals are NEW.
+    state.baseline = parseTime(data.generated_at);
+    writeSession();
+  }
   recomputeWatch();
+  markSeen();
   renderAll();
 }
 
@@ -130,8 +172,13 @@ async function fetchFeed() {
     error.status = response.status;
     throw error;
   }
-  const data = await response.json();
-  if (!data || data.version !== 1 || !Array.isArray(data.items)) throw new Error('unexpected feed format');
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error('the feed file is damaged');
+  }
+  if (!data || data.version !== 1 || !Array.isArray(data.items)) throw new Error('the feed file is in an unknown format');
   return data;
 }
 
@@ -144,17 +191,27 @@ async function loadInitial() {
   } catch (error) {
     $('feed').setAttribute('aria-busy', 'false');
     const firstRun = error.status === 404;
+    const offline = navigator.onLine === false;
+    let detail;
+    if (firstRun) detail = 'The first refresh publishes it within about 15 minutes. This page will retry automatically.';
+    else if (offline) detail = "You appear to be offline. This page will retry when it can.";
+    else detail = `The latest feed couldn't be loaded (${error.message}). Retrying in a minute.`;
     $('feed').replaceChildren(
-      firstRun
-        ? ui.emptyState(
-            'No feed data published yet',
-            'The first refresh publishes it within about 15 minutes. This page will retry automatically.',
-          )
-        : ui.emptyState("Couldn't load the feed", `${error.message}. Retrying in a minute.`),
+      ui.emptyState(firstRun ? 'No feed data published yet' : "Couldn't load the feed", detail),
     );
-    $('updated').textContent = firstRun ? 'Waiting for first refresh' : 'Offline';
+    $('updated').textContent = firstRun ? 'Waiting for first refresh' : offline ? 'Offline' : 'Update failed';
     state.retryTimer = setTimeout(loadInitial, 60_000);
   }
+}
+
+/** New items in `data` that the reader would actually see with the current view and filters. */
+function visibleArrivals(data) {
+  const sourcesById = new Map(sourcesFrom(data).map((s) => [s.id, s]));
+  const fresh = data.items
+    .filter((raw) => isUsable(raw) && !state.itemsById.has(raw.id))
+    .map((raw) => enrich(raw, sourcesById));
+  applyWatch(fresh);
+  return state.prefs.view === 'saved' ? [] : filterItems(fresh, filterContext());
 }
 
 async function poll() {
@@ -166,15 +223,18 @@ async function poll() {
   } catch {
     return; // keep showing what we have; the next tick tries again
   }
-  if (data.generated_at === state.data.generated_at) return;
-  const fresh = data.items.filter((raw) => isUsable(raw) && !state.itemsById.has(raw.id)).length;
+  const latest = state.pending ?? state.data;
+  if (data.generated_at === latest.generated_at) return;
+  const fresh = visibleArrivals(data).length;
+  const label = `${fresh} new ${fresh === 1 ? 'item' : 'items'}`;
   if (window.scrollY < AT_TOP_PX) {
     applyData(data);
-    if (fresh) announce(`${fresh} new ${fresh === 1 ? 'item' : 'items'} added`);
+    if (fresh) announce(`${label} added`);
   } else {
     state.pending = data;
+    renderHeader();
     if (fresh) {
-      $('new-pill').textContent = `↑ ${fresh} new ${fresh === 1 ? 'item' : 'items'}`;
+      $('new-pill').textContent = `↑ ${label}`;
       $('new-pill').hidden = false;
     }
   }
@@ -189,14 +249,13 @@ function applyPending() {
 // ── Filtering ───────────────────────────────────────────────────────────────
 const isRead = (id) => storage.isRead(id);
 const isSaved = (id) => storage.isSaved(id);
-const isNew = (item) => Number.isFinite(state.baseline) && item.firstSeenMs > state.baseline;
 
-function filterContext(view = state.prefs.view, tokens = state.tokens) {
+function filterContext(view = state.prefs.view, tokens = state.tokens, { unfiltered = false } = {}) {
   return {
     view,
     tokens,
-    hiddenCategories: new Set(state.prefs.hiddenCategories),
-    hiddenSources: new Set(state.prefs.hiddenSources),
+    hiddenCategories: new Set(unfiltered ? [] : state.prefs.hiddenCategories),
+    hiddenSources: new Set(unfiltered ? [] : state.prefs.hiddenSources),
     isRead,
     isSaved,
     isNew,
@@ -219,8 +278,8 @@ function savedItems() {
   return sortItems(items);
 }
 
-function itemsForView(view) {
-  return view === 'saved' ? savedItems() : state.items;
+function itemsForView(view, saved) {
+  return view === 'saved' ? (saved ?? savedItems()) : state.items;
 }
 
 function visibleItems() {
@@ -238,8 +297,26 @@ function renderAll() {
   renderFeed();
 }
 
+// Keep keyboard focus on the same item control when the feed is rebuilt.
+function feedFocusKey() {
+  const active = document.activeElement;
+  const article = active?.closest?.('#feed article[data-id]');
+  if (!article) return null;
+  return { id: article.dataset.id, action: active.dataset.action ?? null };
+}
+
+function restoreFeedFocus(key) {
+  if (!key) return;
+  const article = articleFor(key.id);
+  const target = key.action
+    ? article?.querySelector(`[data-action="${key.action}"]`)
+    : article?.querySelector('.item-title a');
+  target?.focus({ preventScroll: true });
+}
+
 function renderFeed() {
   if (!state.data) return;
+  const focus = feedFocusKey();
   const list = visibleItems();
   renderActiveFilters(list.length);
   if (!list.length) {
@@ -249,6 +326,11 @@ function renderFeed() {
     return;
   }
   feedRenderer.render(list, renderContext());
+  restoreFeedFocus(focus);
+}
+
+function scrollToFeedTop() {
+  if (window.scrollY > 0) window.scrollTo({ top: 0 });
 }
 
 function hasFilters() {
@@ -256,20 +338,28 @@ function hasFilters() {
 }
 
 function emptyStateFor() {
-  const clear = hasFilters() ? { id: 'clear', label: 'Clear filters' } : null;
-  switch (state.prefs.view) {
+  const clear = { id: 'clear', label: 'Clear filters' };
+  const view = state.prefs.view;
+  const hiddenByFilters =
+    hasFilters() && filterItems(itemsForView(view), filterContext(view, [], { unfiltered: true })).length > 0;
+  if (hiddenByFilters) {
+    return ui.emptyState('Nothing matches these filters', 'Clear the search, category or source filters to see more.', clear);
+  }
+  switch (view) {
     case 'new':
-      return ui.emptyState('Nothing new since your last visit', 'New items appear here as the feed refreshes.', clear);
+      return ui.emptyState('Nothing new since your last visit', 'New items appear here as the feed refreshes.');
     case 'unread':
-      return ui.emptyState("You're all caught up", 'Every item in this view has been read.', clear);
+      return ui.emptyState("You're all caught up", 'Every item in this view has been read.');
     case 'saved':
-      return ui.emptyState('Nothing saved yet', 'Use the star on any item to keep it here, even after it leaves the feed.', clear);
+      return ui.emptyState('Nothing saved yet', 'Use the star on any item to keep it here, even after it leaves the feed.');
     case 'watchlist':
       return state.terms.length
-        ? ui.emptyState('No recent items mention your watchlist terms', null, clear)
+        ? ui.emptyState('No recent items mention your watchlist terms', 'Matches appear here as new items arrive.')
         : ui.emptyState('Your watchlist is empty', 'Add terms in the sidebar to highlight items that mention them.');
     default:
-      return ui.emptyState('Nothing matches these filters', null, clear ?? { id: 'clear', label: 'Clear filters' });
+      return state.items.length
+        ? ui.emptyState('Nothing matches these filters', null, clear)
+        : ui.emptyState('No items yet', 'Nothing has been published in the last 7 days. This page refreshes automatically.');
   }
 }
 
@@ -287,7 +377,11 @@ function renderActiveFilters(count) {
   const hiddenSources = state.prefs.hiddenSources.filter((id) => state.sourcesById.has(id)).length;
   if (hiddenSources) {
     const shown = state.sources.length - hiddenSources;
-    parts.push(shown === 1 ? `Only ${state.sources.find((s) => !state.prefs.hiddenSources.includes(s.id))?.name}` : `${hiddenSources} sources hidden`);
+    parts.push(
+      shown === 1
+        ? `Only ${state.sources.find((s) => !state.prefs.hiddenSources.includes(s.id))?.name}`
+        : `${hiddenSources} sources hidden`,
+    );
   }
   if (state.query.trim()) parts.push(`“${state.query.trim()}”`);
   bar.hidden = parts.length === 0;
@@ -305,13 +399,21 @@ function countBy(items, key) {
   return counts;
 }
 
+function freshness(now = Date.now()) {
+  const latest = state.pending ?? state.data;
+  const generated = parseTime(latest?.generated_at);
+  if (!Number.isFinite(generated)) return null;
+  return { generated, stale: now - generated > STALE_MS, label: `Updated ${updatedLabel(generated, now)}` };
+}
+
 function renderSidebar() {
   const focused = focusKey(document.activeElement);
   const now = Date.now();
+  const saved = savedItems();
 
   // View counts respect category/source filters (not search).
   for (const view of VIEWS) {
-    const count = filterItems(itemsForView(view), filterContext(view, [])).length;
+    const count = filterItems(itemsForView(view, saved), filterContext(view, [])).length;
     const button = document.querySelector(`[data-view="${view}"]`);
     button.querySelector('.count').textContent = String(count);
     if (view === state.prefs.view) button.setAttribute('aria-current', 'true');
@@ -328,30 +430,38 @@ function renderSidebar() {
   $('sources-reset').hidden = !state.prefs.hiddenSources.length;
   ui.renderWatchTerms($('watch-terms'), state.terms);
   $('watch-hint').hidden = state.terms.length > 0;
-  ui.renderHealth($('source-health'), state.sources, now);
+  const fresh = freshness(now);
+  ui.renderHealth($('source-health'), state.sources, now, {
+    open: Boolean($('source-health').querySelector('details')?.open),
+    updated: fresh?.label ?? '',
+    stale: fresh?.stale ?? false,
+  });
   restoreFocus(focused);
 }
 
 function renderHeader() {
-  const now = Date.now();
-  const generated = parseTime(state.data?.generated_at);
+  const fresh = freshness();
   const updated = $('updated');
-  if (Number.isFinite(generated)) {
-    const stale = now - generated > STALE_MS;
-    updated.textContent = `Updated ${updatedLabel(generated, now)}`;
-    updated.classList.toggle('is-stale', stale);
-    updated.title = stale
+  if (fresh) {
+    updated.textContent = fresh.label;
+    updated.classList.toggle('is-stale', fresh.stale);
+    updated.title = fresh.stale
       ? 'The feed has not refreshed for over an hour. The scheduled refresh may be paused; see the README.'
-      : `Feed refreshed ${new Date(generated).toLocaleString()}`;
+      : `Feed refreshed ${new Date(fresh.generated).toLocaleString()}`;
+    const banner = $('stale-banner');
+    banner.hidden = !fresh.stale;
+    if (fresh.stale) {
+      banner.textContent = `This feed was last ${fresh.label.toLowerCase()}. The scheduled refresh may be paused; check the Actions tab of the Owlfeed repository.`;
+    }
   }
-  const newCount = filterItems(state.items, filterContext('new', [])).length;
+  const newCount = state.data ? filterItems(state.items, filterContext('new', [])).length : 0;
   const chip = $('new-chip');
   chip.hidden = newCount === 0;
   chip.textContent = `${newCount} new`;
   chip.setAttribute('aria-pressed', String(state.prefs.view === 'new'));
 }
 
-// Keep keyboard focus on the same control when the sidebar is rebuilt.
+// Keep keyboard focus on the same sidebar control when the sidebar is rebuilt.
 function focusKey(node) {
   if (!node?.dataset) return null;
   for (const attr of ['category', 'source', 'only', 'removeTerm']) {
@@ -376,7 +486,7 @@ function setView(view) {
   state.prefs.view = VIEWS.includes(view) ? view : 'all';
   savePrefs();
   renderAll();
-  window.scrollTo({ top: 0 });
+  scrollToFeedTop();
   closeDrawer();
 }
 
@@ -387,6 +497,12 @@ function toggleListValue(list, value, include) {
   return [...set];
 }
 
+function filtersChanged() {
+  savePrefs();
+  renderAll();
+  scrollToFeedTop();
+}
+
 function resetFilters() {
   state.prefs.hiddenCategories = [];
   state.prefs.hiddenSources = [];
@@ -394,8 +510,7 @@ function resetFilters() {
   state.query = '';
   state.tokens = [];
   $('search').value = '';
-  savePrefs();
-  renderAll();
+  filtersChanged();
 }
 
 function articleFor(id) {
@@ -415,27 +530,30 @@ function markRead(ids, read = true) {
   renderSidebar();
 }
 
-function itemById(id) {
-  return state.itemsById.get(id) ?? savedItems().find((item) => item.id === id);
+function snapshotOf(item) {
+  return {
+    id: item.id,
+    title: item.title,
+    url: item.url,
+    summary: item.summary,
+    source: item.source,
+    sourceName: item.sourceName,
+    category: item.category,
+    published: new Date(item.publishedMs).toISOString(),
+    first_seen: new Date(item.firstSeenMs).toISOString(),
+    savedAt: new Date().toISOString(),
+  };
 }
 
 function toggleSaved(id) {
   const saved = !storage.isSaved(id);
-  const item = itemById(id);
-  if (saved && item) {
-    storage.setSaved({
-      id: item.id,
-      title: item.title,
-      url: item.url,
-      summary: item.summary,
-      source: item.source,
-      sourceName: item.sourceName,
-      category: item.category,
-      published: new Date(item.publishedMs).toISOString(),
-      first_seen: new Date(item.firstSeenMs).toISOString(),
-      savedAt: new Date().toISOString(),
-    });
+  if (saved) {
+    const item = state.itemsById.get(id);
+    const snapshot = item ? snapshotOf(item) : unsavedSnapshots.get(id);
+    if (!snapshot || !storage.setSaved({ ...snapshot, savedAt: new Date().toISOString() })) return;
   } else {
+    const current = storage.savedItems().find((s) => s.id === id);
+    if (current) unsavedSnapshots.set(id, current);
     storage.setSaved({ id }, false);
   }
   const button = articleFor(id)?.querySelector('[data-action="save"]');
@@ -457,13 +575,16 @@ function markAllRead() {
 
 let announceTimer = null;
 function announce(message) {
-  const status = $('status');
-  status.textContent = message;
-  status.hidden = false;
+  // The visible toast is decorative (aria-hidden); a permanently present live region speaks.
+  $('announcer').textContent = message;
+  const toast = $('status');
+  toast.textContent = message;
+  toast.hidden = false;
   clearTimeout(announceTimer);
   announceTimer = setTimeout(() => {
-    status.hidden = true;
-    status.textContent = '';
+    toast.hidden = true;
+    toast.textContent = '';
+    $('announcer').textContent = '';
   }, 4000);
 }
 
@@ -487,19 +608,30 @@ function toggleTheme() {
   syncThemeButton();
 }
 
-// ── Drawer (phones) ─────────────────────────────────────────────────────────
+// ── Drawer (phones and small tablets) ───────────────────────────────────────
+// While closed, the off-screen sidebar is inert (not focusable or announced); while open it
+// is modal: the rest of the page is inert until it closes.
+function syncDrawer() {
+  const open = document.body.classList.contains('drawer-open');
+  $('sidebar').inert = narrow.matches && !open;
+  $('main').inert = narrow.matches && open;
+}
+
 function openDrawer() {
   document.body.classList.add('drawer-open');
   $('scrim').hidden = false;
   $('menu-btn').setAttribute('aria-expanded', 'true');
+  syncDrawer();
   $('sidebar-close').focus();
 }
 
-function closeDrawer() {
+function closeDrawer({ returnFocus = true } = {}) {
   if (!document.body.classList.contains('drawer-open')) return;
   document.body.classList.remove('drawer-open');
   $('scrim').hidden = true;
   $('menu-btn').setAttribute('aria-expanded', 'false');
+  syncDrawer();
+  if (returnFocus && narrow.matches) $('menu-btn').focus();
 }
 
 // ── Backup / restore ────────────────────────────────────────────────────────
@@ -514,13 +646,18 @@ function exportSettings() {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
+function reloadFromStorage() {
+  state.prefs = storage.prefs();
+  if (!VIEWS.includes(state.prefs.view)) state.prefs.view = 'all';
+  state.terms = storage.watchlist();
+  recomputeWatch();
+  renderAll();
+}
+
 async function importSettings(file) {
   try {
     const result = storage.importData(JSON.parse(await file.text()));
-    state.prefs = storage.prefs();
-    state.terms = storage.watchlist();
-    recomputeWatch();
-    renderAll();
+    reloadFromStorage();
     announce(`Restored: ${result.saved} saved items and ${result.terms} watchlist terms added`);
   } catch (error) {
     announce(`Couldn't restore: ${error instanceof SyntaxError ? 'the file is not valid JSON' : error.message}`);
@@ -528,6 +665,12 @@ async function importSettings(file) {
 }
 
 // ── Events ──────────────────────────────────────────────────────────────────
+function changeWatchlist(change) {
+  state.terms = storage.updateWatchlist(change);
+  recomputeWatch();
+  renderAll();
+}
+
 function wireEvents() {
   document.querySelector('.view-list').addEventListener('click', (event) => {
     const button = event.target.closest('[data-view]');
@@ -539,16 +682,14 @@ function wireEvents() {
     const category = event.target.dataset.category;
     if (category == null) return;
     state.prefs.hiddenCategories = toggleListValue(state.prefs.hiddenCategories, category, !event.target.checked);
-    savePrefs();
-    renderAll();
+    filtersChanged();
   });
 
   $('source-list').addEventListener('change', (event) => {
     const source = event.target.dataset.source;
     if (source == null) return;
     state.prefs.hiddenSources = toggleListValue(state.prefs.hiddenSources, source, !event.target.checked);
-    savePrefs();
-    renderAll();
+    filtersChanged();
   });
 
   $('source-list').addEventListener('click', (event) => {
@@ -557,14 +698,12 @@ function wireEvents() {
     const source = state.sourcesById.get(only);
     state.prefs.hiddenSources = state.sources.filter((s) => s.id !== only).map((s) => s.id);
     state.prefs.hiddenCategories = state.prefs.hiddenCategories.filter((c) => c !== source?.category);
-    savePrefs();
-    renderAll();
+    filtersChanged();
   });
 
   $('sources-reset').addEventListener('click', () => {
     state.prefs.hiddenSources = [];
-    savePrefs();
-    renderAll();
+    filtersChanged();
   });
 
   let searchTimer = null;
@@ -574,34 +713,29 @@ function wireEvents() {
       state.query = event.target.value;
       state.tokens = parseQuery(state.query);
       renderFeed();
+      scrollToFeedTop();
     }, 150);
   });
 
   $('watch-form').addEventListener('submit', (event) => {
     event.preventDefault();
     const input = $('watch-input');
-    const { terms, added } = addTerm(state.terms, input.value);
+    const term = input.value;
     input.value = '';
-    if (!added) return;
-    state.terms = terms;
-    storage.setWatchlist(terms);
-    recomputeWatch();
-    renderAll();
+    if (!addTerm(state.terms, term).added) return;
+    changeWatchlist((terms) => addTerm(terms, term).terms);
   });
 
   $('watch-terms').addEventListener('click', (event) => {
     const term = event.target.closest('[data-remove-term]')?.dataset.removeTerm;
     if (term == null) return;
-    state.terms = removeTerm(state.terms, term);
-    storage.setWatchlist(state.terms);
-    recomputeWatch();
-    renderAll();
+    changeWatchlist((terms) => removeTerm(terms, term));
+    $('watch-input').focus(); // the chip (and its button) no longer exists
   });
 
   const feed = $('feed');
   feed.addEventListener('click', (event) => {
-    const emptyAction = event.target.closest('[data-empty-action]');
-    if (emptyAction) {
+    if (event.target.closest('[data-empty-action]')) {
       resetFilters();
       return;
     }
@@ -618,8 +752,7 @@ function wireEvents() {
   });
   feed.addEventListener('auxclick', (event) => {
     if (event.button !== 1) return;
-    const link = event.target.closest('.item-title a');
-    const id = link?.closest('article[data-id]')?.dataset.id;
+    const id = event.target.closest('.item-title a')?.closest('article[data-id]')?.dataset.id;
     if (id) markRead([id]);
   });
 
@@ -630,13 +763,18 @@ function wireEvents() {
   $('theme-btn').addEventListener('click', toggleTheme);
   $('new-pill').addEventListener('click', applyPending);
   $('menu-btn').addEventListener('click', openDrawer);
-  $('sidebar-close').addEventListener('click', closeDrawer);
-  $('scrim').addEventListener('click', closeDrawer);
+  $('sidebar-close').addEventListener('click', () => closeDrawer());
+  $('scrim').addEventListener('click', () => closeDrawer());
   $('export-btn').addEventListener('click', exportSettings);
+  $('import-btn').addEventListener('click', () => $('import-input').click());
   $('import-input').addEventListener('change', (event) => {
     const [file] = event.target.files;
     if (file) importSettings(file);
     event.target.value = '';
+  });
+  narrow.addEventListener('change', () => {
+    if (!narrow.matches) closeDrawer({ returnFocus: false });
+    syncDrawer();
   });
 
   document.addEventListener('keydown', (event) => {
@@ -655,26 +793,69 @@ function wireEvents() {
     }
   });
 
-  window.addEventListener('scroll', () => {
-    if (state.pending && window.scrollY < AT_TOP_PX) applyPending();
-  }, { passive: true });
+  window.addEventListener(
+    'scroll',
+    () => {
+      if (state.pending && window.scrollY < AT_TOP_PX) applyPending();
+    },
+    { passive: true },
+  );
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') rememberVisit();
-    else if (Date.now() - state.lastFetch >= POLL_MS) poll();
+    if (document.visibilityState === 'hidden') {
+      state.hiddenAt = Date.now();
+      rememberVisit();
+      return;
+    }
+    if (state.hiddenAt && Date.now() - state.hiddenAt >= VISIT_GAP_MS) {
+      startVisit(); // back after a long break: a new visit with a fresh NEW baseline
+      if (state.data) renderAll();
+    }
+    state.hiddenAt = null;
+    markSeen();
+    if (Date.now() - state.lastFetch >= POLL_MS) poll();
   });
   window.addEventListener('pagehide', rememberVisit);
+
+  // Read/saved/watchlist changes made in another tab.
+  storage.listen((key) => {
+    if (!state.data) return;
+    if (key === null || key === 'watchlist') {
+      state.terms = storage.watchlist();
+      recomputeWatch();
+      renderAll();
+    } else if (key === 'read' || key === 'saved') {
+      syncItemStates(); // in place, so the reader keeps their scroll position
+      renderSidebar();
+    }
+  });
+}
+
+function syncItemStates() {
+  for (const article of $('feed').querySelectorAll('article[data-id]')) {
+    const read = storage.isRead(article.dataset.id);
+    article.classList.toggle('is-read', read);
+    ui.setActionState(article.querySelector('[data-action="read"]'), read);
+    ui.setActionState(article.querySelector('[data-action="save"]'), storage.isSaved(article.dataset.id));
+  }
 }
 
 function tick() {
   const now = Date.now();
   ui.refreshAges($('feed'), now);
-  if (state.data) renderHeader();
+  if (state.data) {
+    renderHeader();
+    const fresh = freshness(now);
+    const label = $('source-health').querySelector('.health-updated');
+    if (label && fresh) label.textContent = fresh.label;
+  }
   if (document.visibilityState === 'visible' && now - state.lastFetch >= POLL_MS) poll();
 }
 
+initVisit();
 storage.pruneRead();
 syncThemeButton();
+syncDrawer();
 wireEvents();
 loadInitial();
 setInterval(tick, TICK_MS);

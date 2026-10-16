@@ -97,11 +97,63 @@ test('export and import round trip merges without duplicates', () => {
   assert.equal(backup.app, 'owlfeed');
 
   const target = createStorage(new MemoryBackend());
-  target.setWatchlist(['apt28']);
+  target.updateWatchlist(() => ['apt28']);
   const result = target.importData(backup);
   assert.deepEqual(result, { terms: 1, saved: 1 });
   assert.deepEqual(target.watchlist(), ['apt28', 'Volt Typhoon']);
   assert.ok(target.isSaved('a1') && target.isRead('r1'));
   assert.equal(target.prefs().view, 'unread');
   assert.throws(() => target.importData({ hello: 'world' }), /not an Owlfeed backup/);
+});
+
+test('two tabs never overwrite each other', () => {
+  const backend = new MemoryBackend();
+  const tabA = createStorage(backend);
+  const tabB = createStorage(backend);
+  assert.ok(!tabA.isRead('x') && !tabB.isRead('y')); // both tabs have cached their (empty) maps
+  tabA.setRead(['x']);
+  tabB.setRead(['y']);
+  tabA.setSaved(SNAPSHOT);
+  tabB.setSaved({ ...SNAPSHOT, id: 'b2' });
+  tabA.updateWatchlist((terms) => [...terms, 'APT28']);
+  tabB.updateWatchlist((terms) => [...terms, 'Volt Typhoon']);
+  const fresh = createStorage(backend);
+  assert.ok(fresh.isRead('x') && fresh.isRead('y'));
+  assert.ok(fresh.isSaved('a1') && fresh.isSaved('b2'));
+  assert.deepEqual(fresh.watchlist(), ['APT28', 'Volt Typhoon']);
+});
+
+test('storage events from another tab invalidate the cache', () => {
+  const backend = new MemoryBackend();
+  const tabA = createStorage(backend);
+  const tabB = createStorage(backend);
+  const target = new EventTarget();
+  const changes = [];
+  tabB.listen((key) => changes.push(key), target);
+  assert.ok(!tabB.isRead('x'));
+  tabA.setRead(['x']);
+  const event = new Event('storage');
+  event.key = 'owlfeed:v1:read';
+  target.dispatchEvent(event);
+  assert.deepEqual(changes, ['read']);
+  assert.ok(tabB.isRead('x'));
+  const unrelated = new Event('storage');
+  unrelated.key = 'someone-else';
+  target.dispatchEvent(unrelated);
+  assert.deepEqual(changes, ['read']);
+});
+
+test('last visit only moves forward', () => {
+  const store = createStorage(new MemoryBackend());
+  assert.equal(store.lastVisit(), null);
+  store.advanceLastVisit('2026-10-15T14:00:00Z');
+  store.advanceLastVisit('2026-10-15T13:00:00Z');
+  store.advanceLastVisit('not a date');
+  assert.equal(store.lastVisit(), '2026-10-15T14:00:00Z');
+});
+
+test('setSaved reports whether a snapshot was stored', () => {
+  const store = createStorage(new MemoryBackend());
+  assert.equal(store.setSaved(SNAPSHOT), true);
+  assert.equal(store.setSaved({ id: 'nope', title: 'x', url: 'ftp://x' }), false);
 });

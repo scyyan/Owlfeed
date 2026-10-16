@@ -1,6 +1,10 @@
 // Per-browser state: read items, saved items, watchlist, filter preferences, last visit.
 // Everything lives in localStorage (never sent anywhere). If storage is unavailable
 // (private mode, blocked site data) the dashboard still works for the current visit.
+//
+// Several tabs can be open at once, so every change re-reads the stored value right before
+// writing (read-modify-write) instead of writing back a possibly stale in-memory copy, and
+// other tabs' changes arrive through the browser's "storage" event (see listen()).
 
 const PREFIX = 'owlfeed:v1:';
 const READ_TTL_DAYS = 30;
@@ -54,17 +58,18 @@ function cleanSnapshot(value) {
 export function createStorage(backend = defaultBackend()) {
   const memory = new Map();
 
-  function load(key, fallback) {
-    if (memory.has(key)) return memory.get(key);
-    let value = fallback;
+  function readBackend(key, fallback) {
     try {
       const raw = backend?.getItem(PREFIX + key);
-      if (raw != null) value = JSON.parse(raw);
+      return raw == null ? fallback : JSON.parse(raw);
     } catch {
-      value = fallback;
+      return memory.has(key) ? memory.get(key) : fallback;
     }
-    memory.set(key, value);
-    return value;
+  }
+
+  function load(key, fallback) {
+    if (!memory.has(key)) memory.set(key, readBackend(key, fallback));
+    return memory.get(key);
   }
 
   function save(key, value) {
@@ -76,50 +81,76 @@ export function createStorage(backend = defaultBackend()) {
     }
   }
 
-  const readMap = () => {
-    const value = load('read', {});
-    return isPlainObject(value) ? value : {};
-  };
-  const savedMap = () => {
-    const value = load('saved', {});
-    return isPlainObject(value) ? value : {};
-  };
+  /** Apply a change to the freshest stored copy, so another tab's writes are not lost. */
+  function update(key, fallback, change) {
+    const current = readBackend(key, fallback);
+    save(key, change(current));
+  }
+
+  const asObject = (value) => (isPlainObject(value) ? value : {});
+  const readMap = () => asObject(load('read', {}));
+  const savedMap = () => asObject(load('saved', {}));
 
   return {
+    /** Forget cached values (all, or one key) so the next read comes from storage. */
+    invalidate(key) {
+      if (key == null) memory.clear();
+      else memory.delete(key);
+    },
+
+    /** Call onChange(key) when another tab changes a stored value. Returns an unsubscribe function. */
+    listen(onChange, target = globalThis) {
+      const handler = (event) => {
+        if (event.key !== null && !event.key?.startsWith(PREFIX)) return;
+        const key = event.key === null ? null : event.key.slice(PREFIX.length);
+        this.invalidate(key);
+        onChange(key);
+      };
+      target.addEventListener?.('storage', handler);
+      return () => target.removeEventListener?.('storage', handler);
+    },
+
     isRead: (id) => Object.hasOwn(readMap(), id),
     readCount: () => Object.keys(readMap()).length,
     setRead(ids, read = true, now = Date.now()) {
-      const next = { ...readMap() };
-      for (const id of ids) {
-        if (read) next[id] = now;
-        else delete next[id];
-      }
-      save('read', next);
+      update('read', {}, (current) => {
+        const next = { ...asObject(current) };
+        for (const id of ids) {
+          if (read) next[id] = now;
+          else delete next[id];
+        }
+        return next;
+      });
     },
     /** Forget read marks older than the retention window to keep storage small. */
     pruneRead(now = Date.now()) {
       const cutoff = now - READ_TTL_DAYS * DAY;
-      const current = readMap();
-      const next = Object.fromEntries(Object.entries(current).filter(([, at]) => typeof at === 'number' && at >= cutoff));
-      if (Object.keys(next).length !== Object.keys(current).length) save('read', next);
+      update('read', {}, (current) =>
+        Object.fromEntries(Object.entries(asObject(current)).filter(([, at]) => typeof at === 'number' && at >= cutoff)),
+      );
     },
 
     isSaved: (id) => Object.hasOwn(savedMap(), id),
     savedItems: () => Object.values(savedMap()),
     setSaved(snapshot, saved = true) {
-      const next = { ...savedMap() };
-      if (saved) {
-        const clean = cleanSnapshot(snapshot);
-        if (!clean) return;
-        next[clean.id] = clean;
-      } else {
-        delete next[snapshot.id];
-      }
-      save('saved', next);
+      const clean = saved ? cleanSnapshot(snapshot) : null;
+      if (saved && !clean) return false;
+      update('saved', {}, (current) => {
+        const next = { ...asObject(current) };
+        if (saved) next[clean.id] = clean;
+        else delete next[snapshot.id];
+        return next;
+      });
+      return true;
     },
 
     watchlist: () => stringList(load('watchlist', [])),
     setWatchlist: (terms) => save('watchlist', stringList(terms)),
+    /** Change the watchlist against the freshest stored copy; change(terms) returns the new list. */
+    updateWatchlist(change) {
+      update('watchlist', [], (current) => stringList(change(stringList(current))));
+      return this.watchlist();
+    },
 
     prefs() {
       const value = load('prefs', DEFAULT_PREFS);
@@ -132,11 +163,18 @@ export function createStorage(backend = defaultBackend()) {
     },
     setPrefs: (prefs) => save('prefs', prefs),
 
+    /** The newest feed build (its generated_at, server time) this reader has had on screen. */
     lastVisit() {
       const value = load('lastVisit', null);
-      return typeof value === 'string' ? value : null;
+      return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
     },
-    setLastVisit: (iso) => save('lastVisit', iso),
+    /** Only ever moves forward, so an older tab closing later cannot rewind it. */
+    advanceLastVisit(iso) {
+      if (!Number.isFinite(Date.parse(iso))) return;
+      update('lastVisit', null, (current) =>
+        typeof current === 'string' && Date.parse(current) >= Date.parse(iso) ? current : iso,
+      );
+    },
 
     theme() {
       const value = load('theme', null);
@@ -146,6 +184,7 @@ export function createStorage(backend = defaultBackend()) {
 
     /** Everything worth carrying to another browser, as a plain object. */
     exportData(now = new Date()) {
+      this.invalidate();
       return {
         app: 'owlfeed',
         version: 1,
@@ -162,27 +201,34 @@ export function createStorage(backend = defaultBackend()) {
       if (!isPlainObject(data) || data.app !== 'owlfeed') {
         throw new Error('This file is not an Owlfeed backup.');
       }
-      const terms = this.watchlist();
-      const lower = new Set(terms.map((t) => t.toLowerCase()));
-      const newTerms = stringList(data.watchlist).filter((t) => t.trim() && !lower.has(t.toLowerCase()));
-      this.setWatchlist([...terms, ...newTerms]);
+      let termsAdded = 0;
+      this.updateWatchlist((terms) => {
+        const lower = new Set(terms.map((t) => t.toLowerCase()));
+        const fresh = stringList(data.watchlist).filter((t) => t.trim() && !lower.has(t.toLowerCase()));
+        termsAdded = fresh.length;
+        return [...terms, ...fresh];
+      });
 
-      const saved = { ...savedMap() };
       let savedAdded = 0;
-      for (const value of Object.values(isPlainObject(data.saved) ? data.saved : {})) {
-        const clean = cleanSnapshot(value);
-        if (clean && !saved[clean.id]) {
-          saved[clean.id] = clean;
-          savedAdded += 1;
+      update('saved', {}, (current) => {
+        const saved = { ...asObject(current) };
+        for (const value of Object.values(asObject(data.saved))) {
+          const clean = cleanSnapshot(value);
+          if (clean && !saved[clean.id]) {
+            saved[clean.id] = clean;
+            savedAdded += 1;
+          }
         }
-      }
-      save('saved', saved);
+        return saved;
+      });
 
-      const read = { ...readMap() };
-      for (const [id, at] of Object.entries(isPlainObject(data.read) ? data.read : {})) {
-        if (typeof at === 'number') read[id] = Math.max(read[id] ?? 0, at);
-      }
-      save('read', read);
+      update('read', {}, (current) => {
+        const read = { ...asObject(current) };
+        for (const [id, at] of Object.entries(asObject(data.read))) {
+          if (typeof at === 'number') read[id] = Math.max(read[id] ?? 0, at);
+        }
+        return read;
+      });
 
       if (isPlainObject(data.prefs)) {
         save('prefs', {
@@ -191,7 +237,7 @@ export function createStorage(backend = defaultBackend()) {
           hiddenSources: stringList(data.prefs.hiddenSources),
         });
       }
-      return { terms: newTerms.length, saved: savedAdded };
+      return { terms: termsAdded, saved: savedAdded };
     },
   };
 }
