@@ -53,9 +53,10 @@ _INLINE_BOILERPLATE = [
     re.compile(r"\s*\(more…\)\s*$", re.I),
     re.compile(r"\s*Categories: .{0,200}?(?:Tags: .{0,300})?$", re.S),
     re.compile(r"^View CSAF\s+(?:Summary\s+)?", re.I),
-    re.compile(r"^(?:Key Takeaways|Case Summary)\s+"),
     # Prefer ending at the closing call-to-action; fall back to the "Get in Touch" heading.
-    re.compile(r"\s*The DFIR Report Offerings\b(?:.{0,300}?pricing or a demo!|.{0,200}?Get in Touch)\s*", re.S),
+    re.compile(r"The DFIR Report Offerings\b(?:.{0,300}?pricing or a demo!|.{0,200}?Get in Touch)\s*", re.S),
+    # Run after the marketing block is gone: it can sit between two such headings.
+    re.compile(r"^(?:(?:Key Takeaways|Case Summary)\s+)+"),
 ]
 # SANS ISC appends the diary date to titles: "Title, (Wed, Oct 14th)".
 _TITLE_DATE_SUFFIX = re.compile(r",?\s*\((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th)\)$")

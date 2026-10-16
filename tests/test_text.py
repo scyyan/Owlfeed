@@ -140,6 +140,11 @@ def test_summary_drops_bylines_and_inline_marketing():
         "Get in Touch Contact us today for pricing or a demo! The intrusion began with a malicious search ad."
     )
     assert summary_text(dfir) == "The intrusion began with a malicious search ad."
+    sandwiched = (
+        "Key Takeaways The DFIR Report Offerings Check out our Products here. Contact us today for pricing "
+        "or a demo! Case Summary In March 2026, our team identified an SEO poisoning campaign."
+    )
+    assert summary_text(sandwiched) == "In March 2026, our team identified an SEO poisoning campaign."
 
 
 def test_clean_title_drops_sans_date_suffix():
