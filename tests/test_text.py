@@ -273,3 +273,54 @@ def test_truncate_keeps_initials_after_acronyms_and_cuts_before_product_names():
     assert truncate("The group known as APT X. Officials said the campaign targeted ministries across Europe.", 40) == (
         "The group known as APT X."
     )
+
+
+def test_double_escaped_line_breaks_pixels_and_wordpress_comments_are_cleaned():
+    # PHP nl2br + htmlspecialchars, a tracking pixel, a leading &nbsp; and a "more" comment.
+    assert summary_text(
+        "Officials confirmed the outage on Friday.&lt;br /&gt;&lt;br /&gt;The ministry said services would resume."
+    ) == "Officials confirmed the outage on Friday. The ministry said services would resume."
+    pixel = '&lt;img src="https://feeds.feedburner.com/~r/x/~4/abc" height="1" width="1" alt=""/&gt;'
+    assert summary_text(f"Officials confirmed the outage on Friday. {pixel}") == "Officials confirmed the outage on Friday."
+    assert summary_text("&amp;nbsp;&lt;p&gt;Officials confirmed the outage on Friday.&lt;/p&gt;") == (
+        "Officials confirmed the outage on Friday."
+    )
+    assert summary_text("Officials confirmed the outage on Friday. &lt;!--more--&gt; The ministry said more.") == (
+        "Officials confirmed the outage on Friday. The ministry said more."
+    )
+    assert clean_title("Breaking:&lt;br /&gt;Ransomware hits hospital chain") == "Breaking: Ransomware hits hospital chain"
+
+
+def test_a_tag_mention_does_not_hide_the_text_after_it():
+    tweet = (
+        "&lt;p&gt;Magecart operators injected a &amp;lt;script&amp;gt; tag into the checkout page.&lt;/p&gt;"
+        "&lt;blockquote&gt;&lt;p&gt;We are aware of the incident.&lt;/p&gt;&lt;/blockquote&gt;"
+        "&lt;script async src=\"https://platform.twitter.com/widgets.js\"&gt;&lt;/script&gt;"
+        "&lt;p&gt;The company has since removed the code.&lt;/p&gt;"
+    )
+    text = summary_text(tweet)
+    assert text.startswith("Magecart operators injected a")
+    assert text.endswith("We are aware of the incident. The company has since removed the code.")
+    inline = (
+        "&lt;script&gt;for (var i=0;i&lt;n.length;i++){}&lt;/script&gt;"
+        "&lt;p&gt;Officials confirmed the outage on Friday.&lt;/p&gt;"
+    )
+    assert summary_text(inline) == "Officials confirmed the outage on Friday."
+
+
+def test_plain_titles_keep_tag_mentions_that_are_the_story():
+    for title in (
+        "Chrome bug let <img> tags leak cross-origin data",
+        "Stored XSS via <img src=x onerror=alert(1)> hits Roundcube webmail",
+        "Firefox fixes <br> parsing flaw that broke sanitizers",
+    ):
+        assert clean_title(title, plain=True) == title
+
+
+def test_truncate_does_not_end_at_a_quoted_question_or_long_abbreviation():
+    text = 'In a blog post titled "Are you ready?" the company said it had detected unusual activity on its network.'
+    assert truncate(text, 60) == 'In a blog post titled "Are you ready?" the company said it…'
+    text = "The bundle includes several popular apps, incl. the messaging client and the browser, and ships next month."
+    assert truncate(text, 80).endswith("…") and "incl. the messaging" in truncate(text, 80)
+    text = "The investigation is ongoing… and officials say more arrests are expected in the coming weeks."
+    assert truncate(text, 70) == "The investigation is ongoing… and officials say more arrests are…"

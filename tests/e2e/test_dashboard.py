@@ -476,3 +476,36 @@ def test_toast_never_blocks_taps(page, server):
     open_dashboard(page, server)
     page.evaluate("document.getElementById('status').hidden = false")
     assert page.evaluate("getComputedStyle(document.getElementById('status')).pointerEvents") == "none"
+
+
+def test_focus_stays_on_an_empty_state_without_a_button_across_refreshes(make_page, server):
+    page = make_page()
+    page.clock.install(time=NOW)
+    open_dashboard(page, server)
+    item(page, "ExampleVPN").get_by_role("button", name="Save for later").click()
+    page.locator('[data-view="saved"]').click()
+    expect(page.locator("article.item")).to_have_count(1)
+    unsave = item(page, "ExampleVPN").get_by_role("button", name="Remove from saved")
+    unsave.focus()
+    page.keyboard.press("Enter")
+    for minutes in (5, 10):  # the first refresh empties the view, the second re-renders it
+        server.write_feed(build_feed(generated_at=NOW + timedelta(minutes=minutes)))
+        page.clock.run_for(5 * 60_000 + 1_000)
+        expect(page.get_by_text("Nothing saved yet")).to_be_visible()
+        assert page.evaluate("document.activeElement.classList.contains('empty')")
+        assert page.evaluate("document.activeElement.closest('#feed') !== null")
+
+
+def test_bar_clear_focus_depends_on_how_it_was_pressed(page, server):
+    open_dashboard(page, server)
+    search = page.get_by_role("searchbox")
+    clear = page.locator("#active-filters").get_by_role("button", name="Clear", exact=True)
+    search.fill("Example")
+    expect(page.locator("article.item").first).to_be_visible()
+    clear.click()
+    expect(page.locator("article.item")).to_have_count(len(ITEMS))
+    assert page.evaluate("document.activeElement.closest('article')?.dataset.id") == "i01"
+    search.fill("Example")
+    clear.press("Enter")
+    expect(page.locator("article.item")).to_have_count(len(ITEMS))
+    assert page.evaluate("document.activeElement.id") == "search"

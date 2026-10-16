@@ -300,8 +300,9 @@ function renderAll() {
 // Keep keyboard focus on the same item control when the feed is rebuilt.
 function feedFocusKey() {
   const active = document.activeElement;
-  const article = active?.closest?.('#feed article[data-id]');
-  if (!article) return null;
+  if (!active?.closest?.('#feed')) return null;
+  const article = active.closest('article[data-id]');
+  if (!article) return { id: null, action: null }; // on the empty state
   return { id: article.dataset.id, action: active.dataset.action ?? null };
 }
 
@@ -311,9 +312,9 @@ function focusFirstItem() {
 
 function restoreFeedFocus(key) {
   if (!key) return;
-  const article = articleFor(key.id);
+  const article = key.id && articleFor(key.id);
   if (!article) {
-    focusFirstItem(); // the focused item is gone (filtered out or expired)
+    focusFirstItem(); // the focused item is gone (filtered out or expired), or the feed was empty
     return;
   }
   const target = key.action

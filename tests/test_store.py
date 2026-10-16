@@ -219,6 +219,18 @@ def test_tombstones_survive_while_a_source_is_not_reread():
     assert ids(changed) == ["id-fresh"]
 
 
+def test_a_short_response_after_a_month_of_304s_keeps_tombstones():
+    nodate = entry("nodate", published=None)
+    first = merge(None, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, NOW)
+    expired_at = NOW + timedelta(days=8)
+    state = merge(first, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, expired_at)
+    state = merge(state, CONFIG, {"alpha": NOT_MODIFIED, "bravo": ok()}, expired_at + timedelta(days=40))
+    short = merge(state, CONFIG, {"alpha": ok(), "bravo": ok()}, expired_at + timedelta(days=41))
+    assert "id-nodate" in short["expired"]
+    back = merge(short, CONFIG, {"alpha": ok(nodate), "bravo": ok()}, expired_at + timedelta(days=42))
+    assert ids(back) == []
+
+
 def test_malformed_tombstones_and_future_items_are_ignored():
     previous = {
         "version": 1,

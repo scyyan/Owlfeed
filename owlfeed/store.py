@@ -201,13 +201,16 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
     tombstone_cutoff = iso(now - timedelta(days=TOMBSTONE_DAYS))
     expired: dict[str, dict] = {}
     for item_id, mark in expired_before.items():
+        outcome = outcomes.get(mark["source"])
         listed = fresh_ids.get(mark["source"])
-        if listed is not None and item_id in listed:
-            # Still in the feed: the 30 days count from the last time it was listed.
+        unchanged = outcome is not None and outcome.error is None and outcome.entries is None  # a 304
+        if unchanged or (listed is not None and item_id in listed):
+            # Still in the feed (or the feed is unchanged since it was): the 30 days count from the
+            # last time it could have been listed, so one short response later cannot revive it.
             expired[item_id] = {"source": mark["source"], "since": now_iso}
         elif listed is None or mark["since"] >= tombstone_cutoff:
-            # Kept while the source was not re-read (304 or error), so a feed that stops changing
-            # or fails for a month cannot bring its old undated items back as "new" afterwards.
+            # Kept while the source fails, so a feed that is down for a month cannot bring its old
+            # undated items back as "new" afterwards.
             expired[item_id] = mark
     for item in merged.values():
         if item["published"] < cutoff and item["date_estimated"] and item["id"] not in expired:

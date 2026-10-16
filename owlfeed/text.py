@@ -23,7 +23,8 @@ _WHITESPACE = re.compile(r"\s+")
 _LEFTOVER_ENTITY = re.compile(r"&(?:#\d{1,7}|#x[0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});")
 # Real markup that survived a first decoding pass, i.e. double-escaped HTML ("&lt;p&gt;…&lt;/p&gt;").
 # Only common content tags count, and a paragraph is parsed again only when it opens with such a tag
-# (or a complete comment) or closes one, so prose that names a tag ("inject a <pre> block",
+# (or a complete comment), closes one, or holds markup no one writes in prose (a line break glued to
+# a word, a tracking pixel, a WordPress comment). Prose that names a tag ("inject a <pre> block",
 # "an <!-- HTML comment -->", "How <script> tags hide malware") keeps its words.
 _CONTENT_TAGS = (
     r"(?:p|div|span|a|em|strong|b|i|u|ul|ol|li|h[1-6]|br|hr|figure|img|blockquote|table|tbody|tr|td|th"
@@ -31,6 +32,15 @@ _CONTENT_TAGS = (
 )
 _ESCAPED_OPENING = re.compile(rf"<!--.*?-->|<{_CONTENT_TAGS}(?:\s[^<>]*)?/?>", re.IGNORECASE | re.DOTALL)
 _ESCAPED_CLOSING = re.compile(rf"</{_CONTENT_TAGS}\s*>", re.IGNORECASE)
+_ESCAPED_VOID = re.compile(
+    r"(?<=\S)<br\s*/?>|<br\s*/?>(?=\S)|<img\s[^<>]*\bsrc\s*=\s*[\"']https?://[^<>]*>|<!--\s*(?:more|/?wp:)[^<>]*-->",
+    re.IGNORECASE,
+)
+# Removed whole before the second pass: a caption, script or style that really closes, taken from its
+# nearest opening tag, so a mentioned "<script>" earlier in the text cannot hide the words after it.
+_CLOSED_SKIP = re.compile(rf"<({'|'.join(sorted(SKIP_TAGS))})\b[^<>]*>(?:(?!<\1\b).)*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+# Decoded on the first pass, these can sit in front of the opening tag of double-escaped HTML.
+_INVISIBLE_LEAD = "\xa0\u200b\ufeff "
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]?(?=\s)")
 # A period after these is not a sentence end: "U.S.", "J. Smith", "Gen. Smith", "Oct. 12", "3 a.m.".
 # A lone capital counts only when it is not part of a name like "AT&T" or "APT X" ("CEO J. Smith" does).
@@ -38,10 +48,12 @@ _ABBREVIATION = re.compile(
     r"(?:(?<![&\w])(?<!\bAPT )[A-Z]|\b(?:Mr|Mrs|Ms|Dr|Prof|St|Mt|Inc|Ltd|Co|Corp|Gen|Gov|Sen|Rep|Lt|Col|Sgt|Capt"
     r"|Adm|Maj|Brig|Dept|Jr|Sr|No|vs|etc|approx|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec|e\.g|i\.e|a\.m|p\.m))\.$"
 )
-# "3 a.m. local time", "Smith et al. found": a short or dotted lowercase word before the period.
-_LOWERCASE_ABBREVIATION = re.compile(r"(?:\b[a-z]{1,3}|\.[a-z])\.$")
-_PLAIN_TITLE_BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
-_PLAIN_TITLE_IMAGE = re.compile(r"<img\b[^<>]*>", re.IGNORECASE)
+# "3 a.m. local time", "Smith et al. found": a short, dotted or listed lowercase word before the period.
+_LOWERCASE_ABBREVIATION = re.compile(r"(?:\b[a-z]{1,3}|\.[a-z]|\b(?:incl|excl|approx|govt|dept|esp|resp|misc))\.$")
+# Stray markup in plain-text titles: a line break glued to a word, an image with a quoted source.
+# A tag named in a headline ("XSS via <img> tags", "<img src=x onerror=…>") stays.
+_PLAIN_TITLE_BREAK = re.compile(r"(?<=\S)<br\s*/?>|<br\s*/?>(?=\S)", re.IGNORECASE)
+_PLAIN_TITLE_IMAGE = re.compile(r"""<img\s[^<>]*\bsrc\s*=\s*["'][^<>]*>""", re.IGNORECASE)
 _TERMINAL = re.compile(r"[.!?…:;\"'”’)\]]$")
 
 # Whole (short) paragraphs that are never part of an article's summary.
@@ -160,12 +172,15 @@ def html_to_paragraphs(value: object) -> list[str]:
         return [collapse_whitespace(value)]
     paragraphs = []
     for paragraph in _parse_paragraphs(value):
-        # Double-escaped HTML ("&lt;p&gt;") only becomes markup after the first pass. On this pass only
-        # captions, scripts, styles and the like that really close are skipped, so prose that mentions
-        # "<script>" next to real markup keeps the words after it.
-        if _ESCAPED_OPENING.match(paragraph) or _ESCAPED_CLOSING.search(paragraph):
-            closed = frozenset(t for t in SKIP_TAGS if re.search(rf"</{t}\s*>", paragraph, re.IGNORECASE))
-            paragraphs.extend(_parse_paragraphs(paragraph, closed, raw_text=False))
+        # Double-escaped HTML ("&lt;p&gt;") only becomes markup after the first pass. Captions, scripts,
+        # styles and the like that really close are cut out first; then nothing is skipped, so prose that
+        # mentions "<script>" next to real markup keeps the words after it.
+        if (
+            _ESCAPED_OPENING.match(paragraph.lstrip(_INVISIBLE_LEAD))
+            or _ESCAPED_CLOSING.search(paragraph)
+            or _ESCAPED_VOID.search(paragraph)
+        ):
+            paragraphs.extend(_parse_paragraphs(_CLOSED_SKIP.sub(" ", paragraph), frozenset(), raw_text=False))
         else:
             paragraphs.append(paragraph)
     return [p for p in paragraphs if p]
@@ -227,8 +242,12 @@ def truncate(text: str, max_chars: int) -> str:
             continue
         if _ABBREVIATION.search(text[: match.start() + 1]):
             continue
-        if text[match.end():].lstrip()[:1].islower() and _LOWERCASE_ABBREVIATION.search(text[: match.start() + 1]):
-            continue  # "…et al. found": the sentence goes on (but "…the flaw. iOS 18.1 fixes…" ends one)
+        if text[match.end():].lstrip()[:1].islower() and (
+            text[match.start()] != "." or _LOWERCASE_ABBREVIATION.search(text[: match.start() + 1])
+        ):
+            # 'asks "Is this your parcel?" before…', "…et al. found": the sentence goes on
+            # (but "…the flaw. iOS 18.1 fixes…" ends one).
+            continue
         cut = match.end()
     if cut:
         return text[:cut].rstrip()
