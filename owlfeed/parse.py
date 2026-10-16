@@ -5,7 +5,7 @@ from __future__ import annotations
 import calendar
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import feedparser
@@ -15,6 +15,16 @@ from .text import clean_title, make_summary, truncate
 
 # Dates further ahead than this are treated as bogus (timezone bugs, scheduled posts).
 FUTURE_TOLERANCE = timedelta(minutes=10)
+FALLBACK_DATE_FORMATS = (
+    "%A, %B %d, %Y - %H:%M",
+    "%B %d, %Y - %H:%M",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%d",
+    "%A, %d %B %Y",
+    "%d %B %Y",
+    "%B %d, %Y",
+)
 TRACKING_PARAMS = frozenset(
     {
         "fbclid", "gclid", "dclid", "yclid", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "mkt_tok",
@@ -84,7 +94,23 @@ def entry_link(entry: dict, base: str) -> str | None:
     return None
 
 
-def entry_published(entry: dict, now: datetime) -> datetime | None:
+def _plausible(moment: datetime, now: datetime) -> bool:
+    return moment.year >= 1995 and moment <= now + FUTURE_TOLERANCE
+
+
+def parse_loose_date(text: str, tz: tzinfo = timezone.utc) -> datetime | None:
+    """Dates feedparser does not understand, e.g. Drupal's "Monday, October 12, 2026 - 21:44"."""
+    text = " ".join(text.split())
+    for fmt in FALLBACK_DATE_FORMATS:
+        try:
+            moment = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        return moment.replace(tzinfo=tz).astimezone(timezone.utc)
+    return None
+
+
+def entry_published(entry: dict, now: datetime, tz: tzinfo = timezone.utc) -> datetime | None:
     for key in ("published_parsed", "updated_parsed", "created_parsed"):
         # dict.get skips feedparser's deprecated updated->published aliasing (and its warning).
         value = dict.get(entry, key)
@@ -94,8 +120,14 @@ def entry_published(entry: dict, now: datetime) -> datetime | None:
             moment = datetime.fromtimestamp(calendar.timegm(value), tz=timezone.utc)
         except (OverflowError, TypeError, ValueError):
             continue
-        if moment.year >= 1995 and moment <= now + FUTURE_TOLERANCE:
+        if _plausible(moment, now):
             return moment.replace(microsecond=0)
+    for key in ("published", "updated", "created"):
+        raw = dict.get(entry, key)
+        if isinstance(raw, str) and not dict.get(entry, f"{key}_parsed"):
+            moment = parse_loose_date(raw, tz)
+            if moment and _plausible(moment, now):
+                return moment
     return None
 
 
@@ -135,7 +167,7 @@ def parse_feed(
         if entry_id in seen:
             continue
         seen.add(entry_id)
-        entries.append(Entry(entry_id, url, title, summary, entry_published(raw, now)))
+        entries.append(Entry(entry_id, url, title, summary, entry_published(raw, now, source.tz)))
 
     entries.sort(key=lambda e: e.published or now, reverse=True)
     return entries[: settings.max_items_per_source]

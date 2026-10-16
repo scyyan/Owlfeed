@@ -37,6 +37,7 @@ def test_valid_config_with_defaults():
         (source(summary_from="body"), "summary_from"),
         (source(exclude_title=["("]), "invalid exclude_title"),
         (source(exclude_title="Deal"), "list of regular expressions"),
+        (source(timezone="Mars/Olympus"), "time zone name"),
     ],
 )
 def test_invalid_sources(bad, message):

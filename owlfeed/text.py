@@ -33,7 +33,7 @@ _JUNK_PARAGRAPH = re.compile(
     r"|this (?:article|story|post) (?:was )?(?:originally|first) (?:appeared|published)\b"
     r"|\(c\)\s|©|copyright\b|creative commons\b"
     r"|categories:|tags:|filed under\b"
-    r"|view csaf\b"
+    r"|view csaf\b|written by:"
     r"|for the latest discoveries in cyber research\b"
     r"|(?:check out our (?:products|services)|want a demo|contact us (?:today|for)|request a demo|book a demo)\b"
     r"|the dfir report offerings\b"
@@ -53,7 +53,12 @@ _INLINE_BOILERPLATE = [
     re.compile(r"\s*\(more…\)\s*$", re.I),
     re.compile(r"\s*Categories: .{0,200}?(?:Tags: .{0,300})?$", re.S),
     re.compile(r"^View CSAF\s+(?:Summary\s+)?", re.I),
+    re.compile(r"^Key Takeaways\s+"),
+    # Prefer ending at the closing call-to-action; fall back to the "Get in Touch" heading.
+    re.compile(r"\s*The DFIR Report Offerings\b(?:.{0,300}?pricing or a demo!|.{0,200}?Get in Touch)\s*", re.S),
 ]
+# SANS ISC appends the diary date to titles: "Title, (Wed, Oct 14th)".
+_TITLE_DATE_SUFFIX = re.compile(r",?\s*\((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th)\)$")
 _BRACKET_ELLIPSIS = re.compile(r"\s*\[\s*(?:…|\.\.\.)\s*\]")
 # "…sentence.…" -> "…sentence." (some feeds append an ellipsis to complete sentences)
 _PUNCTUATED_ELLIPSIS = re.compile(r"([.!?])\s*…$")
@@ -130,7 +135,7 @@ def html_to_text(value: object) -> str:
 
 
 def clean_title(value: object, max_chars: int = 300) -> str:
-    return truncate(html_to_text(value), max_chars)
+    return truncate(_TITLE_DATE_SUFFIX.sub("", html_to_text(value)), max_chars)
 
 
 def _is_heading(paragraph: str) -> bool:

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from owlfeed.config import Settings
-from owlfeed.parse import FeedParseError, clean_link, item_id, parse_feed
+from owlfeed.parse import FeedParseError, clean_link, item_id, parse_feed, parse_loose_date
 
 from .conftest import NOW, feed_bytes, make_source
 
@@ -89,6 +89,17 @@ def test_not_a_feed_raises():
 
 def test_empty_feed_is_valid():
     assert parse("empty.xml") == []
+
+
+def test_loose_dates_and_source_timezones():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>D</title><link>https://d.example/</link>
+    <item><title>Drupal date</title><link>https://d.example/a</link><pubDate>Monday, October 12, 2026 - 21:44</pubDate></item>
+    </channel></rss>"""
+    source = make_source("drupal", timezone="Europe/Brussels")
+    (entry,) = parse_feed(feed, source, Settings(), NOW)
+    assert entry.published == datetime(2026, 10, 12, 19, 44, tzinfo=timezone.utc)  # CEST is UTC+2
+    assert parse_loose_date("2026-10-15") == datetime(2026, 10, 15, tzinfo=timezone.utc)
+    assert parse_loose_date("sometime soon") is None
 
 
 def test_clean_link_strips_only_tracking_parameters():

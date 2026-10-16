@@ -1,6 +1,7 @@
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -21,6 +22,9 @@ def make_source(source_id="example", **overrides):
         group="Security news",
     )
     patterns = overrides.pop("exclude_title", ())
+    zone = overrides.pop("timezone", None)
+    if zone:
+        overrides["tz"] = ZoneInfo(zone)
     values.update(overrides)
     return Source(**values, exclude_title=tuple(re.compile(p, re.I) for p in patterns))
 

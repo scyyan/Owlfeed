@@ -132,6 +132,20 @@ def test_summary_drops_advisory_and_license_boilerplate():
     assert summary_text(sans) == ""
 
 
+def test_summary_drops_bylines_and_inline_marketing():
+    gti = "<p>Written by: Jane Doe, John Roe</p><p>On October 15, a vendor disclosed an actively exploited flaw.</p>"
+    assert summary_text(gti) == "On October 15, a vendor disclosed an actively exploited flaw."
+    dfir = (
+        "Key Takeaways The DFIR Report Offerings Check out our Products here and our Services here. Want a demo? "
+        "Get in Touch Contact us today for pricing or a demo! The intrusion began with a malicious search ad."
+    )
+    assert summary_text(dfir) == "The intrusion began with a malicious search ad."
+
+
+def test_clean_title_drops_sans_date_suffix():
+    assert clean_title("Orphaned VBA Projects Inside DWG Files, (Wed, Oct 14th)") == "Orphaned VBA Projects Inside DWG Files"
+
+
 def test_summary_removes_ellipsis_after_complete_sentence():
     assert summary_text("Threat actors are exploiting a critical flaw in Collabora Online.…") == (
         "Threat actors are exploiting a critical flaw in Collabora Online."

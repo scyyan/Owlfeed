@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import timezone, tzinfo
 from pathlib import Path
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
@@ -35,6 +37,8 @@ class Source:
     enabled: bool = True
     summary_from: str = "auto"
     exclude_title: tuple[re.Pattern, ...] = field(default=(), compare=False)
+    # Applied only to dates that carry no time zone of their own.
+    tz: tzinfo = timezone.utc
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,13 @@ def _parse_source(raw: object, index: int) -> Source:
         compiled = tuple(re.compile(p, re.IGNORECASE) for p in patterns)
     except re.error as exc:
         raise ConfigError(f"{where}: invalid exclude_title pattern: {exc}") from exc
+    zone_name = raw.get("timezone", "UTC")
+    try:
+        zone = ZoneInfo(zone_name) if isinstance(zone_name, str) else None
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = None
+    if zone is None:
+        raise ConfigError(f"{where}: 'timezone' must be a time zone name such as Europe/Brussels")
     return Source(
         id=source_id,
         name=_text_field(raw, "name", where),
@@ -102,6 +113,7 @@ def _parse_source(raw: object, index: int) -> Source:
         enabled=enabled,
         summary_from=summary_from,
         exclude_title=compiled,
+        tz=zone,
     )
 
 
