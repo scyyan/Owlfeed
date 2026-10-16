@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel rdf:about="https://cert.example.net/">
+    <title>Example CERT</title>
+    <link>https://cert.example.net/</link>
+    <description>Sample RSS 1.0 advisories</description>
+    <items>
+      <rdf:Seq>
+        <rdf:li rdf:resource="https://cert.example.net/advisories/2026-001"/>
+      </rdf:Seq>
+    </items>
+  </channel>
+  <item rdf:about="https://cert.example.net/advisories/2026-001">
+    <title>Advisory 2026-001: Critical flaw in ExampleOS</title>
+    <link>https://cert.example.net/advisories/2026-001</link>
+    <description>A critical vulnerability in ExampleOS allows remote code execution. Apply the vendor patch immediately.</description>
+    <dc:date>2026-10-15T11:45:00+02:00</dc:date>
+  </item>
+</rdf:RDF>

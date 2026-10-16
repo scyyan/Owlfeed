@@ -1,0 +1,9 @@
+{
+  "name": "owlfeed",
+  "private": true,
+  "type": "module",
+  "description": "Unit tests for the Owlfeed dashboard's browser modules (no dependencies).",
+  "scripts": {
+    "test": "TZ=UTC node --test \"tests/js/**/*.test.js\""
+  }
+}

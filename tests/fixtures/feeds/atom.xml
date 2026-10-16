@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Example Research</title>
+  <link href="https://research.example.org/"/>
+  <updated>2026-10-15T10:00:00Z</updated>
+  <id>tag:research.example.org,2026:feed</id>
+  <entry>
+    <title type="html">Inside &lt;em&gt;Operation Night Owl&lt;/em&gt;</title>
+    <link rel="alternate" href="/posts/night-owl"/>
+    <id>tag:research.example.org,2026:night-owl</id>
+    <published>2026-10-15T08:15:00Z</published>
+    <updated>2026-10-15T09:00:00Z</updated>
+    <summary type="html">&lt;p&gt;We track a cluster of intrusions against telecom providers. This report details the tooling, infrastructure and victimology.&lt;/p&gt;</summary>
+  </entry>
+  <entry>
+    <title>Only an updated date</title>
+    <link rel="alternate" href="https://research.example.org/posts/updated-only"/>
+    <id>tag:research.example.org,2026:updated-only</id>
+    <updated>2026-10-13T12:00:00Z</updated>
+    <content type="html">&lt;p&gt;An entry that only carries an updated timestamp, which Owlfeed should use as its publication time.&lt;/p&gt;</content>
+  </entry>
+</feed>
