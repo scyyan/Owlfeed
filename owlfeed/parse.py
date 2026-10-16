@@ -15,7 +15,15 @@ from .text import clean_title, make_summary, truncate
 
 # Dates further ahead than this are treated as bogus (timezone bugs, scheduled posts).
 FUTURE_TOLERANCE = timedelta(minutes=10)
-TRACKING_PARAMS = frozenset({"fbclid", "gclid", "dclid", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "mkt_tok", "yclid"})
+TRACKING_PARAMS = frozenset(
+    {
+        "fbclid", "gclid", "dclid", "yclid", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "mkt_tok",
+        "at_medium", "at_campaign",  # BBC
+        "traffic_source",  # Al Jazeera
+        "maca",  # DW
+        "cmpid", "ncid", "sr_share",
+    }
+)
 
 
 class FeedParseError(ValueError):

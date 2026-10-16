@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import feedparser
+
 from .config import Config, ConfigError, Source, load_config
 from .fetch import fetch_all
 from .parse import Entry, FeedParseError, parse_feed
@@ -117,6 +119,20 @@ def _age(moment: datetime | None, now: datetime) -> str:
     return f"{round(hours / 24)}d ago"
 
 
+def _inspect(source_id: str, outcome: SourceOutcome) -> None:
+    """Print raw feed details, for working out why a feed parses oddly."""
+    result = outcome.result
+    print(f"\n=== inspect {source_id}: HTTP {result.status}, content-type {result.content_type!r}")
+    content = result.content or b""
+    print(content[:1500].decode("utf-8", errors="replace"))
+    parsed = feedparser.parse(content, response_headers={"content-type": result.content_type or ""})
+    print(f"--- feedparser version={parsed.get('version')!r} bozo={parsed.get('bozo')} entries={len(parsed.entries)}")
+    for entry in parsed.entries[:2]:
+        for key in sorted(entry):
+            print(f"    {key}: {str(entry[key])[:200]!s}")
+        print("    ---")
+
+
 def _cell(text: str, limit: int = 90) -> str:
     text = text.replace("|", "\\|").replace("\n", " ")
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -162,6 +178,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     healthy = len(enabled) - failures
     print(f"{healthy}/{len(enabled)} enabled sources healthy")
 
+    for source_id in args.inspect or []:
+        outcome = outcomes.get(source_id)
+        if outcome is None:
+            print(f"\n--inspect {source_id}: no such source")
+            continue
+        _inspect(source_id, outcome)
+
     if args.summary_file:
         lines = [
             "## Owlfeed feed check",
@@ -204,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--samples", type=int, default=2, help="sample entries to print per source")
     check.add_argument("--summary-file", help="append a Markdown report (e.g. $GITHUB_STEP_SUMMARY)")
     check.add_argument("--strict", action="store_true", help="exit 1 if any enabled source fails")
+    check.add_argument("--inspect", action="append", metavar="ID", help="dump raw details for a source (repeatable)")
     check.set_defaults(func=cmd_check)
 
     args = parser.parse_args(argv)

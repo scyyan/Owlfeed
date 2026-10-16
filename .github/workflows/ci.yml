@@ -41,4 +41,4 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Check feeds
-        run: python -m owlfeed check --include-disabled --samples 3 --summary-file "$GITHUB_STEP_SUMMARY"
+        run: python -m owlfeed check --include-disabled --samples 3 --summary-file "$GITHUB_STEP_SUMMARY" --inspect crisis-group

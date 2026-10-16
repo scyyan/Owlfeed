@@ -93,6 +93,9 @@ def test_empty_feed_is_valid():
 
 def test_clean_link_strips_only_tracking_parameters():
     assert clean_link("https://x.example/a?utm_source=rss&id=5&fbclid=abc") == "https://x.example/a?id=5"
+    assert clean_link("https://www.bbc.co.uk/news/articles/c1?at_medium=RSS&at_campaign=rss") == (
+        "https://www.bbc.co.uk/news/articles/c1"
+    )
     untouched = "https://x.example/a?b=1&c=hello%20world#frag"
     assert clean_link(untouched) == untouched
 

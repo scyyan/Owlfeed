@@ -1,4 +1,4 @@
-from owlfeed.text import clean_title, html_to_text, make_summary, strip_boilerplate, truncate
+from owlfeed.text import clean_title, html_to_text, make_summary, strip_boilerplate, summary_text, truncate
 
 
 def test_html_to_text_strips_tags_and_decodes_entities():
@@ -85,6 +85,57 @@ def test_make_summary_respects_mode():
     }
     assert make_summary(entry, "description", "T", 320).startswith("The description")
     assert make_summary(entry, "content", "T", 320).startswith("Content text")
+
+
+def test_summary_drops_newsletter_promos():
+    html = (
+        "<p>Sign up here to receive Bellingcat’s biggest investigations by email as soon as they are published.</p>"
+        "<p>Satellite imagery obtained by Bellingcat lays bare the extent of tree-felling at a golf course.</p>"
+    )
+    assert summary_text(html) == "Satellite imagery obtained by Bellingcat lays bare the extent of tree-felling at a golf course."
+
+
+def test_summary_joins_paragraphs_as_sentences():
+    html = (
+        "<p>Attack was the first on the palace in the latest fighting between the Houthis and Saudi Arabia</p>"
+        "<ul><li>Sign up for the Breaking News US email</li></ul>"
+        "<p>Missiles struck the presidential palace complex on Thursday.</p>"
+    )
+    assert summary_text(html) == (
+        "Attack was the first on the palace in the latest fighting between the Houthis and Saudi Arabia. "
+        "Missiles struck the presidential palace complex on Thursday."
+    )
+
+
+def test_summary_drops_headings_and_marketing():
+    html = (
+        "<h2>Key Takeaways</h2><h3>The DFIR Report Offerings</h3>"
+        "<p>Check out our Products here and our Services here.</p><p>Get in Touch</p>"
+        "<p>Contact us today for pricing or a demo!</p>"
+        "<ul><li>Initial access came through a malicious search ad that delivered a trojanized installer.</li></ul>"
+    )
+    assert summary_text(html) == "Initial access came through a malicious search ad that delivered a trojanized installer."
+
+
+def test_summary_handles_double_escaped_html_and_category_footers():
+    escaped = (
+        "&lt;p&gt;The activity is linked to a broader campaign that used a different delivery mechanism&lt;/p&gt; "
+        "Categories: Threat Research Tags: clickfix, loader"
+    )
+    assert summary_text(escaped) == "The activity is linked to a broader campaign that used a different delivery mechanism"
+
+
+def test_summary_drops_advisory_and_license_boilerplate():
+    cisa = "<p><a href='x'>View CSAF</a></p><h2>Summary</h2><p>Successful exploitation could allow file reads.</p>"
+    assert summary_text(cisa) == "Successful exploitation could allow file reads."
+    sans = "(c) SANS Internet Storm Center. https://isc.sans.edu Creative Commons Attribution-Noncommercial 3.0 United States License."
+    assert summary_text(sans) == ""
+
+
+def test_summary_removes_ellipsis_after_complete_sentence():
+    assert summary_text("Threat actors are exploiting a critical flaw in Collabora Online.…") == (
+        "Threat actors are exploiting a critical flaw in Collabora Online."
+    )
 
 
 def test_make_summary_returns_short_text_when_nothing_better():
