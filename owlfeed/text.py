@@ -53,7 +53,7 @@ _INLINE_BOILERPLATE = [
     re.compile(r"\s*\(more…\)\s*$", re.I),
     re.compile(r"\s*Categories: .{0,200}?(?:Tags: .{0,300})?$", re.S),
     re.compile(r"^View CSAF\s+(?:Summary\s+)?", re.I),
-    re.compile(r"^Key Takeaways\s+"),
+    re.compile(r"^(?:Key Takeaways|Case Summary)\s+"),
     # Prefer ending at the closing call-to-action; fall back to the "Get in Touch" heading.
     re.compile(r"\s*The DFIR Report Offerings\b(?:.{0,300}?pricing or a demo!|.{0,200}?Get in Touch)\s*", re.S),
 ]

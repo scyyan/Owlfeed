@@ -165,7 +165,7 @@ input {
   letter-spacing: 0.2px;
 }
 
-.sidebar-close {
+.brand .sidebar-close {
   margin-left: auto;
   display: none;
 }
@@ -516,7 +516,7 @@ input {
   border-bottom: 1px solid var(--border);
 }
 
-.menu-btn {
+.topbar .menu-btn {
   display: none;
 }
 
@@ -866,8 +866,8 @@ mark {
     transform: none;
   }
 
-  .sidebar-close,
-  .menu-btn {
+  .brand .sidebar-close,
+  .topbar .menu-btn {
     display: inline-grid;
   }
 

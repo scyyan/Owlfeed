@@ -187,11 +187,26 @@ sources:
     category: Geopolitics
     group: Analysis & investigations
     timezone: Europe/Brussels   # its feed dates carry no time zone
+    exclude_title: ["[\\u0600-\\u06FF\\u0400-\\u04FF]"]   # skip Arabic and Russian translations
 
   - id: dfrlab
     name: DFRLab (Atlantic Council)
     feed: https://dfrlab.org/feed/
     site: https://dfrlab.org/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  - id: atlantic-council
+    name: Atlantic Council
+    feed: https://www.atlanticcouncil.org/feed/
+    site: https://www.atlanticcouncil.org/
+    category: Geopolitics
+    group: Analysis & investigations
+
+  - id: lowy-interpreter
+    name: The Interpreter (Lowy Institute)
+    feed: https://www.lowyinstitute.org/the-interpreter/rss.xml
+    site: https://www.lowyinstitute.org/the-interpreter
     category: Geopolitics
     group: Analysis & investigations
 
@@ -256,12 +271,28 @@ sources:
     group: Security news
     enabled: false
 
-  - id: project-zero
-    name: Google Project Zero
-    feed: https://googleprojectzero.blogspot.com/feeds/posts/summary?max-results=10
-    site: https://googleprojectzero.blogspot.com/
-    category: Cyber
-    group: Threat research
+  - id: foreign-policy
+    name: Foreign Policy
+    feed: https://foreignpolicy.com/feed/
+    site: https://foreignpolicy.com/
+    category: Geopolitics
+    group: Analysis & investigations
+    enabled: false   # many articles are paywalled
+
+  - id: war-on-the-rocks
+    name: War on the Rocks
+    feed: https://warontherocks.com/feed/
+    site: https://warontherocks.com/
+    category: Geopolitics
+    group: Analysis & investigations
+    enabled: false
+
+  - id: just-security
+    name: Just Security
+    feed: https://www.justsecurity.org/feed/
+    site: https://www.justsecurity.org/
+    category: Geopolitics
+    group: Analysis & investigations
     enabled: false
 
   - id: the-diplomat
@@ -270,6 +301,14 @@ sources:
     site: https://thediplomat.com/
     category: Geopolitics
     group: Analysis & investigations
+    enabled: false
+
+  - id: kyiv-independent
+    name: The Kyiv Independent
+    feed: https://kyivindependent.com/news-archive/rss/
+    site: https://kyivindependent.com/
+    category: Geopolitics
+    group: World news
     enabled: false
 
   - id: dw-world
@@ -294,93 +333,4 @@ sources:
     site: https://news.un.org/en/
     category: Geopolitics
     group: World news
-    enabled: false
-
-  # ── TEMPORARY candidate URLs under test (to be removed) ─────────────────
-  - id: cand-atlantic-council
-    name: Candidate cand-atlantic-council
-    feed: https://www.atlanticcouncil.org/feed/
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
-    enabled: false
-
-  - id: cand-ecfr
-    name: Candidate cand-ecfr
-    feed: https://ecfr.eu/feed/
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
-    enabled: false
-
-  - id: cand-war-on-the-rocks
-    name: Candidate cand-war-on-the-rocks
-    feed: https://warontherocks.com/feed/
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
-    enabled: false
-
-  - id: cand-just-security
-    name: Candidate cand-just-security
-    feed: https://www.justsecurity.org/feed/
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
-    enabled: false
-
-  - id: cand-foreign-policy
-    name: Candidate cand-foreign-policy
-    feed: https://foreignpolicy.com/feed/
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
-    enabled: false
-
-  - id: cand-lowy
-    name: Candidate cand-lowy
-    feed: https://www.lowyinstitute.org/the-interpreter/rss.xml
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
-    enabled: false
-
-  - id: cand-carnegie
-    name: Candidate cand-carnegie
-    feed: https://carnegieendowment.org/rss/solr/?fa=pubs
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
-    enabled: false
-
-  - id: cand-cfr
-    name: Candidate cand-cfr
-    feed: https://www.cfr.org/rss.xml
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
-    enabled: false
-
-  - id: cand-chatham-house
-    name: Candidate cand-chatham-house
-    feed: https://www.chathamhouse.org/path/rss.xml
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
-    enabled: false
-
-  - id: cand-kyiv-independent
-    name: Candidate cand-kyiv-independent
-    feed: https://kyivindependent.com/news-archive/rss/
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
-    enabled: false
-
-  - id: cand-isw-ctp-feed
-    name: Candidate cand-isw-ctp-feed
-    feed: https://www.criticalthreats.org/rss.xml
-    site: https://example.com/
-    category: Geopolitics
-    group: Analysis & investigations
     enabled: false

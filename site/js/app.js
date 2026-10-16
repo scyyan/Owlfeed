@@ -63,11 +63,21 @@ function rememberVisit() {
 }
 
 // ── Data ────────────────────────────────────────────────────────────────────
+/** Items we can show: an id, a title, an http(s) link and a valid date. */
+function isUsable(raw) {
+  return Boolean(
+    raw &&
+      typeof raw.id === 'string' &&
+      typeof raw.title === 'string' &&
+      ui.safeUrl(raw.url) &&
+      Number.isFinite(parseTime(raw.published)),
+  );
+}
+
 function enrich(raw) {
-  if (!raw || typeof raw.id !== 'string' || typeof raw.title !== 'string') return null;
+  if (!isUsable(raw)) return null;
   const url = ui.safeUrl(raw.url);
   const publishedMs = parseTime(raw.published);
-  if (!url || !Number.isFinite(publishedMs)) return null;
   const firstSeenMs = parseTime(raw.first_seen);
   const source = state.sourcesById.get(raw.source);
   const sourceName = source?.name ?? raw.sourceName ?? raw.source ?? 'Unknown source';
@@ -157,7 +167,7 @@ async function poll() {
     return; // keep showing what we have; the next tick tries again
   }
   if (data.generated_at === state.data.generated_at) return;
-  const fresh = data.items.filter((item) => item && !state.itemsById.has(item.id)).length;
+  const fresh = data.items.filter((raw) => isUsable(raw) && !state.itemsById.has(raw.id)).length;
   if (window.scrollY < AT_TOP_PX) {
     applyData(data);
     if (fresh) announce(`${fresh} new ${fresh === 1 ? 'item' : 'items'} added`);
