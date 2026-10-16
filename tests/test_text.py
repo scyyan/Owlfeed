@@ -343,3 +343,26 @@ def test_truncate_does_not_end_at_a_quoted_question_or_long_abbreviation():
     assert truncate(text, 80).endswith("…") and "incl. the messaging" in truncate(text, 80)
     text = "The investigation is ongoing… and officials say more arrests are expected in the coming weeks."
     assert truncate(text, 70) == "The investigation is ongoing… and officials say more arrests are…"
+
+
+def test_nl2br_breaks_after_quotes_brackets_and_ellipses_are_cleaned():
+    # htmlspecialchars(nl2br(text)): every line ends in "<br />" plus a newline.
+    for first in (
+        "The Minister said: “We are working with the national CERT to restore services.”",
+        "The flaw is tracked as CVE-2026-20431 (CVSS 9.8)",
+        'Recipients are asked to "confirm their bank details"',
+        "Attackers exploited the flaw in the wild…",
+        "Exposure to the flaw rose sharply over the past month, by about 40%",
+        "Officials confirmed the outage on Monday. ",
+    ):
+        text = f"{first}&lt;br /&gt;\n&lt;br /&gt;\nThe ministry said services would resume.&lt;br /&gt;\nCitizens can file taxes."
+        assert "<" not in summary_text(text), first
+        assert summary_text(text).startswith(first.strip())
+    more = "Officials confirmed the outage.&lt;br /&gt;\n&lt;br /&gt;\n&lt;!--more--&gt;&lt;br /&gt;\nThe ministry said more."
+    assert summary_text(more) == "Officials confirmed the outage. The ministry said more."
+    quoted_more = "The minister said: “We are working on it.” &lt;!--more--&gt; The outage hit 40,000 households."
+    assert summary_text(quoted_more) == "The minister said: “We are working on it.” The outage hit 40,000 households."
+    assert clean_title("Ransomware gang claims attack on hospital chain (update)&lt;br /&gt;") == (
+        "Ransomware gang claims attack on hospital chain (update)"
+    )
+    assert clean_title("CISA: “Patch now”<br /> Ivanti flaw exploited", plain=True) == "CISA: “Patch now” Ivanti flaw exploited"
