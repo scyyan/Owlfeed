@@ -34,11 +34,11 @@ _ESCAPED_CLOSING = re.compile(rf"</{_CONTENT_TAGS}\s*>", re.IGNORECASE)
 # Void markup no one writes in prose, removed on its own (other tags the text names keep their words):
 # line breaks glued to a word or the end of a sentence, quote or bracket ("Friday.<br /><br />The",
 # "possible.”<br />", "(CVSS 9.8)<br />"), a 1x1 tracking pixel, and a WordPress comment standing
-# between sentences. "converts newlines to <br>, but" and 'such as "<br>"' are prose.
-_STRAY_BREAKS = re.compile(
-    r"(?:(?<=[\w.!?:;…%)\]”’])|(?<=\S[\"']))<br\s*/?>(?:\s*<br\s*/?>)*\s*|(?:<br\s*/?>\s*)*<br\s*/?>(?=\w)",
-    re.IGNORECASE,
-)
+# between sentences. "converts newlines to <br>, but", 'such as "<br>"' and '("<br>", "<hr>")' are prose.
+_BREAK_RUN = re.compile(r"<br\s*/?>(?:\s*<br\s*/?>)*", re.IGNORECASE)
+# What a break run is glued to on its left: a word, a sentence end, a closing bracket or curly quote,
+# or a straight quote that closes one of those.
+_GLUED_BEFORE_BREAK = re.compile(r"(?:[\w.!?:;…%)\]”’]|[\w.!?…%)\]][\"'])$")
 # Once one break is plainly markup, every break in that text is (nl2br output: "Monday. <br />\nCitizens").
 _ANY_BREAKS = re.compile(r"(?:<br\s*/?>\s*)+", re.IGNORECASE)
 _STRAY_COMMENT = re.compile(
@@ -113,6 +113,15 @@ _TITLE_DATE_SUFFIX = re.compile(r",?\s*\((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [A-Z][
 _BRACKET_ELLIPSIS = re.compile(r"\s*\[\s*(?:…|\.\.\.)\s*\]")
 # "…sentence.…" -> "…sentence." (some feeds append an ellipsis to complete sentences)
 _PUNCTUATED_ELLIPSIS = re.compile(r"([.!?])\s*…$")
+
+
+def _has_stray_break(text: str) -> bool:
+    """A line break glued to a word or a sentence end on either side, i.e. markup rather than a mention."""
+    for run in _BREAK_RUN.finditer(text):  # one pass, so long runs of breaks stay cheap
+        after = text[run.end() : run.end() + 1]
+        if _GLUED_BEFORE_BREAK.search(text[max(0, run.start() - 2) : run.start()]) or after.isalnum() or after == "_":
+            return True
+    return False
 
 
 def _is_tracking_pixel(tag: str) -> bool:
@@ -201,7 +210,7 @@ def html_to_paragraphs(value: object) -> list[str]:
             paragraphs.extend(_parse_paragraphs(_CLOSED_SKIP.sub(" ", paragraph), frozenset(), raw_text=False))
         elif "<" in paragraph:
             cleaned = _STRAY_COMMENT.sub(" ", _drop_images(paragraph, _is_tracking_pixel))
-            parts = _ANY_BREAKS.split(cleaned) if _STRAY_BREAKS.search(cleaned) else [cleaned]
+            parts = _ANY_BREAKS.split(cleaned) if _has_stray_break(cleaned) else [cleaned]
             paragraphs.extend(p for p in map(collapse_whitespace, parts) if p)
         else:
             paragraphs.append(paragraph)
@@ -219,7 +228,7 @@ def clean_title(value: object, max_chars: int = 300, plain: bool = False) -> str
         # Stray line breaks and images still show up in some plain titles; a tag the headline names
         # ("XSS via <img> tags", "<img src=x onerror=…>", "fixes <br>-handling flaw") stays.
         text = _drop_images(value, _is_stray_title_image)
-        text = _ANY_BREAKS.sub(" ", text) if _STRAY_BREAKS.search(text) else text
+        text = _ANY_BREAKS.sub(" ", text) if _has_stray_break(text) else text
         text = collapse_whitespace(_LEFTOVER_ENTITY.sub(lambda m: unescape(m.group(0)), text))
     else:
         text = html_to_text(value)

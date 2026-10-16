@@ -316,6 +316,8 @@ def test_plain_titles_keep_tag_mentions_that_are_the_story():
         "Firefox fixes <br> parsing flaw that broke sanitizers",
         'Firefox fixes "<br>" parsing flaw that broke sanitizers',
         "Sanitizer bypass with <br>, <p> and <hr> tags fools DOMPurify",
+        'DOMPurify 3.2.4 fixes mutation XSS that abused ("<br>", "<hr>") inside SVG',
+        'Only two tags—"<br>" and "<p>"—survived the comment filter',
     ):
         assert clean_title(title, plain=True) == title
 
@@ -328,6 +330,8 @@ def test_prose_that_names_void_tags_keeps_every_word():
         'The CSRF request hides in an image tag such as <img src="https://bank.example/transfer?to=x">, which loads.',
         "The plugin converts newlines to <br>-separated lines but does not escape the rest of the comment body.",
         "Wordfence found the payload inside a <!-- wp:html --> block that editors rarely open.",
+        'The kit pads the page with dozens of document.write("<br>") calls to push the form out of view.',
+        'The sanitizer keeps <br> but drops <hr>; in the patched release ("<br>" included) both are normalised.',
     ):
         escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         assert summary_text(f"<p>{escaped}</p>") == text
