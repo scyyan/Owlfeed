@@ -11,18 +11,23 @@
   --accent: #2453c8;
   --accent-soft: #e7edfb;
   --cyber: #2563eb;
-  --geo: #c2620c;
+  --cyber-ink: #2563eb;
+  --geo: #0a7380; /* teal: no warm hue, so a Geopolitics byline never reads as an alarm */
+  --geo-ink: #0a7380;
   --other: #7c3aed;
   --new: #0f6e33;
   --new-soft: #dff4e6;
   --watch: #a15c00;
   --watch-soft: #fdf0d9;
+  --watch-wash: #fef6e8;
   --mark: #ffe58f;
   --ok: #16a34a;
   --error: #b93d06;
   --saved: #b45309;
   --on-accent: #ffffff;
   --focus: #2453c8;
+  --hover-tint: rgb(0 0 0 / 8%);
+  --scrim: rgb(0 0 0 / 40%);
   --shadow: 0 1px 2px rgb(16 24 40 / 5%);
   --radius: 12px;
   --sidebar-w: 292px;
@@ -32,56 +37,64 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0c0f13;
-    --surface: #141920;
-    --surface-2: #1b222b;
-    --text: #e8ebef;
-    --text-2: #bcc4ce;
-    --muted: #8a94a2;
-    --border: #252d37;
+    --bg: #0a0e1a;
+    --surface: #10162a;
+    --surface-2: #182039;
+    --text: #e7ebf5;
+    --text-2: #b9c2d9;
+    --muted: #8b95b1;
+    --border: #252e4a;
     --accent: #7aa5ff;
-    --accent-soft: #1a2640;
+    --accent-soft: #1b2650;
     --cyber: #7aa5ff;
-    --geo: #f2a65a;
+    --cyber-ink: #7aa5ff;
+    --geo: #3cc6d0;
+    --geo-ink: #3cc6d0;
     --other: #b794f6;
     --new: #4ade80;
-    --new-soft: #12311f;
+    --new-soft: #10301f;
     --watch: #f5c451;
-    --watch-soft: #33270f;
+    --watch-soft: #3a2c10;
+    --watch-wash: #27221c;
     --mark: rgb(245 196 81 / 32%);
     --ok: #4ade80;
     --error: #fb8b4b;
     --saved: #f5c451;
-    --on-accent: #0c0f13;
+    --on-accent: #0a0e1a;
     --focus: #7aa5ff;
+    --hover-tint: rgb(255 255 255 / 10%);
     --shadow: none;
     color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #0c0f13;
-  --surface: #141920;
-  --surface-2: #1b222b;
-  --text: #e8ebef;
-  --text-2: #bcc4ce;
-  --muted: #8a94a2;
-  --border: #252d37;
+  --bg: #0a0e1a;
+  --surface: #10162a;
+  --surface-2: #182039;
+  --text: #e7ebf5;
+  --text-2: #b9c2d9;
+  --muted: #8b95b1;
+  --border: #252e4a;
   --accent: #7aa5ff;
-  --accent-soft: #1a2640;
+  --accent-soft: #1b2650;
   --cyber: #7aa5ff;
-  --geo: #f2a65a;
+  --cyber-ink: #7aa5ff;
+  --geo: #3cc6d0;
+  --geo-ink: #3cc6d0;
   --other: #b794f6;
   --new: #4ade80;
-  --new-soft: #12311f;
+  --new-soft: #10301f;
   --watch: #f5c451;
-  --watch-soft: #33270f;
+  --watch-soft: #3a2c10;
+  --watch-wash: #27221c;
   --mark: rgb(245 196 81 / 32%);
   --ok: #4ade80;
   --error: #fb8b4b;
   --saved: #f5c451;
-  --on-accent: #0c0f13;
+  --on-accent: #0a0e1a;
   --focus: #7aa5ff;
+  --hover-tint: rgb(255 255 255 / 10%);
   --shadow: none;
   color-scheme: dark;
 }
@@ -116,6 +129,107 @@ input {
 
 [hidden] {
   display: none !important;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 50;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 650;
+  text-decoration: none;
+  transform: translateY(-160%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 24px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  box-shadow: inset 0 -1px 0 var(--border); /* the keycap's lower edge */
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* ── Shortcuts dialog ───────────────────────────────────────────────────── */
+.help {
+  width: min(460px, calc(100vw - 32px));
+  padding: 18px 20px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+}
+
+.help::backdrop {
+  background: var(--scrim);
+}
+
+.help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.help-title {
+  margin: 0;
+  font-size: 16.5px;
+  font-weight: 650;
+}
+
+.keys {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 9px 16px;
+  align-items: center;
+  margin: 0;
+}
+
+.keys dt {
+  display: flex;
+  gap: 4px;
+}
+
+.keys dd {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.help-subtitle {
+  margin: 18px 0 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.help-text {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
 }
 
 .sr-only {
@@ -204,10 +318,62 @@ input {
 }
 
 .group-heading {
-  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 6px;
+  border-radius: 6px;
   text-transform: none;
   letter-spacing: 0;
+  font-size: 12.5px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.group-heading::-webkit-details-marker {
+  display: none;
+}
+
+/* A drawn chevron: points right when folded, down when open. */
+.group-heading::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin: 0 3px 0 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+.source-group[open] > .group-heading::before {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.group-heading:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.group-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-tally {
   font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.group-tally.is-error {
+  color: var(--error);
+  font-weight: 650;
+}
+
+.source-group .source-list {
+  margin-bottom: 4px;
 }
 
 .side-heading-row {
@@ -372,6 +538,22 @@ input {
   font-weight: 600;
 }
 
+/* "Already on your watchlist": the existing chip answers with one pulse. */
+.chip.is-flash {
+  animation: chip-flash 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes chip-flash {
+  0%,
+  45% {
+    box-shadow: 0 0 0 3px var(--watch);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
 .chip-remove {
   display: inline-grid;
   place-items: center;
@@ -391,7 +573,7 @@ input {
 }
 
 .chip-remove:hover {
-  background: rgb(0 0 0 / 8%);
+  background: var(--hover-tint);
 }
 
 .hint {
@@ -404,39 +586,6 @@ input {
   padding-top: 12px;
   border-top: 1px solid var(--border);
   font-size: 13px;
-}
-
-.health-summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 6px 6px;
-}
-
-.health-updated {
-  margin: 0 6px 6px;
-  color: var(--muted);
-}
-
-.health-updated.is-stale {
-  color: var(--error);
-  font-weight: 600;
-}
-
-.health-details {
-  margin: 0 6px 8px;
-  color: var(--text-2);
-}
-
-.health-details summary {
-  cursor: pointer;
-  color: var(--error);
-}
-
-.health-details ul {
-  margin: 6px 0 0;
-  padding-left: 18px;
-  font-size: 12.5px;
 }
 
 .side-actions {
@@ -459,8 +608,29 @@ input {
   white-space: nowrap;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   background: var(--surface-2);
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.mark-all .btn-label {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Phones keep "mark all read" in the drawer, not beside the search box (see the 600px query). */
+.theme-link {
+  display: none;
+}
+
+.mark-all-drawer {
+  display: none;
+  width: calc(100% - 8px);
+  margin: 10px 4px 0;
+  justify-content: center;
 }
 
 .btn-small {
@@ -488,7 +658,7 @@ input {
 }
 
 .icon-btn:hover,
-.btn-ghost:hover {
+.btn-ghost:hover:not(:disabled) {
   background: var(--surface-2);
   color: var(--text);
 }
@@ -548,6 +718,11 @@ input {
   display: none;
 }
 
+.topbar .icon-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
 .search {
   position: relative;
   flex: 1;
@@ -586,20 +761,252 @@ input {
   outline: 2px solid var(--new);
 }
 
-.updated {
-  margin-left: auto;
+/* ── Watch status: the top bar's anchor. Owl eyes + freshness + source health. ── */
+.watch {
+  position: relative;
+  flex: none;
+}
+
+.watch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-2);
   font-size: 12.5px;
-  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.watch-btn:hover {
+  background: var(--surface-2);
+}
+
+.watch-btn[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
+.watch-eyes {
+  width: 30px;
+  height: 14px;
+  flex: none;
+  overflow: visible;
+}
+
+.watch-eyes .eyes-open {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.watch-eyes .eye {
+  fill: var(--surface);
+  stroke: var(--text-2);
+  stroke-width: 1.6;
+}
+
+.watch-eyes .pupil {
+  fill: var(--ok);
+  transition: fill 0.3s ease;
+}
+
+.watch-eyes .eyes-shut {
+  display: none;
+  fill: none;
+  stroke: var(--error);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.watch-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.watch-short {
+  display: none;
+}
+
+.watch-tally {
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.watch-unit {
+  font-weight: 500;
+}
+
+/* Loading: the pupils are hollow until the first data arrives. */
+.watch-btn[data-state="loading"] .pupil {
+  fill: var(--surface);
+  stroke: var(--muted);
+  stroke-width: 1.4;
+}
+
+/* Running late: the owl is more alert, not sleepier. Wide ink pupils, a firm edge, a "Late" flag. */
+.watch-btn[data-state="aging"] {
+  border-color: var(--text-2);
+  color: var(--text);
+}
+
+.watch-btn[data-state="aging"] .pupil {
+  fill: var(--text);
+  transform: scale(1.3);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.watch-btn[data-state="aging"] .eye {
+  stroke: var(--text);
+}
+
+.watch-flag {
+  padding: 1px 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 15px;
+  text-transform: uppercase;
+}
+
+/* Stale: the owl's eyes close, in rust. */
+.watch-btn[data-state="stale"] {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.watch-btn[data-state="stale"] .eyes-open {
+  display: none;
+}
+
+.watch-btn[data-state="stale"] .eyes-shut {
+  display: inline;
+}
+
+.watch-btn.has-failing .watch-tally {
+  color: var(--error);
+}
+
+.watch-eyes.is-blinking .eyes-open {
+  animation: owl-blink 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes owl-blink {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  35% {
+    transform: scaleY(0.08);
+  }
+}
+
+.watch-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 12;
+  width: 340px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  font-size: 13px;
+}
+
+.watch-verdict {
+  margin: 0 0 10px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.watch-verdict.is-aging {
+  color: var(--text-2);
+}
+
+.watch-verdict.is-stale {
+  color: var(--error);
+}
+
+.watch-rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 0;
+}
+
+.watch-rows dt {
+  color: var(--muted);
+}
+
+.watch-rows dd {
+  margin: 0;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.watch-failing-title {
+  margin: 12px 0 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--error);
+  font-weight: 650;
+}
+
+.watch-legend {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.watch-legend dt {
+  font-weight: 650;
+  color: var(--text-2);
+}
+
+.watch-legend dd {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.watch-failing {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  font-size: 12.5px;
 }
 
 .updated.is-stale {
-  color: var(--error);
-  font-weight: 600;
+  font-weight: 650;
+}
+
+.topbar .mark-all {
+  margin-left: auto;
 }
 
 /* ── Feed ───────────────────────────────────────────────────────────────── */
 .stale-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 6px 14px;
+  flex-wrap: wrap;
   margin: 10px 0 4px;
   padding: 10px 14px;
   border: 1px solid var(--error);
@@ -609,8 +1016,33 @@ input {
   font-weight: 600;
 }
 
+.stale-text {
+  flex: 1 1 260px;
+  margin: 0;
+}
+
+.stale-dismiss {
+  color: var(--error);
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.watch-owner {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.watch-owner a {
+  color: var(--accent);
+}
+
 .active-filters {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -644,6 +1076,10 @@ input {
   bottom: 20px;
   left: calc(50% + var(--sidebar-w) / 2);
   z-index: 40; /* above the phone drawer */
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: calc(100vw - 32px);
   transform: translateX(-50%);
   padding: 9px 16px;
   border-radius: 10px;
@@ -651,7 +1087,31 @@ input {
   color: var(--bg);
   font-size: 13.5px;
   box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
-  pointer-events: none; /* never blocks a tap on the buttons beneath it */
+  pointer-events: none; /* never blocks a tap on the buttons beneath it... */
+}
+
+.status.has-action {
+  padding: 5px 6px 5px 16px;
+}
+
+.status-action {
+  pointer-events: auto; /* ...except its own action button */
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--bg);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.status-action:hover {
+  background: color-mix(in srgb, var(--bg) 14%, transparent);
+}
+
+.status-action:focus-visible {
+  outline-color: var(--bg);
 }
 
 .loading {
@@ -700,15 +1160,39 @@ input {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 14px;
   padding: 14px 16px 14px 18px;
-  border-left: 3px solid transparent;
 }
 
 .item + .item {
   border-top: 1px solid var(--border);
 }
 
+/* A watchlist hit: the owl's eye caught it. The whole row takes on an amber wash. */
 .item.is-watch {
-  border-left-color: var(--watch);
+  background: var(--watch-wash);
+}
+
+/* In the Watchlist hits view every row is a hit: the wash would mark nothing, so the badge carries it. */
+.item.is-watch.is-read,
+.feed[data-showing="watchlist"] .item.is-watch {
+  background: var(--surface);
+}
+
+/*
+ * The keyboard cursor (j/k, Tab): the whole row lights, not only the headline's ring. It comes
+ * after every row background and outranks them all (.feed + .item + :has = 0,3,0 or more, and
+ * the watch variant matches the watchlist view's 0,4,0 while coming later), so it always shows.
+ */
+.feed .item:has(:focus-visible),
+.feed[data-showing] .item.is-watch:has(:focus-visible) {
+  background: color-mix(in srgb, var(--accent-soft) 60%, var(--surface));
+}
+
+.feed .item.is-watch:not(.is-read):has(:focus-visible) {
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--watch-wash));
+}
+
+.feed[data-showing="watchlist"] .item.is-watch:has(:focus-visible) {
+  background: color-mix(in srgb, var(--accent-soft) 60%, var(--surface));
 }
 
 .item-title {
@@ -750,8 +1234,17 @@ input {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-weight: 600;
+  font-weight: 650;
   color: var(--text-2);
+}
+
+/* The domain reads at a glance: source names carry their category's ink. */
+.item-source.cat-cyber {
+  color: var(--cyber-ink);
+}
+
+.item-source.cat-geopolitics {
+  color: var(--geo-ink);
 }
 
 .item-source::before {
@@ -790,8 +1283,18 @@ input {
 }
 
 .badge-watch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 5px;
   background: var(--watch-soft);
   color: var(--watch);
+}
+
+.badge-watch .icon {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.2;
 }
 
 .item-summary {
@@ -817,6 +1320,28 @@ mark {
   color: inherit;
 }
 
+/* Search matches: Night Sky Blue, so they never read as watchlist hits. */
+mark.hl-search {
+  padding: 0;
+  background: var(--accent-soft);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  border-radius: 3px 3px 0 0;
+}
+
+/* Where both apply, the watchlist mark wins outright: two highlight styles never stack. */
+mark.hl-watch.hl-search {
+  background: var(--mark);
+  box-shadow: none;
+  border-radius: 3px;
+}
+
+.filters-tip {
+  flex-basis: 100%;
+  order: 3;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
 .item-actions {
   display: flex;
   flex-direction: column;
@@ -825,25 +1350,38 @@ mark {
   grid-column: 2;
 }
 
+/* Tactile and firm: a visible surface at rest, a clear press, and a pressed state that reads as done. */
 .item-btn {
   display: inline-grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   padding: 0;
-  border: 0;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
+  background: var(--surface);
+  color: var(--text-2);
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
 }
 
 .item-btn:hover {
+  border-color: color-mix(in srgb, var(--text-2) 45%, var(--border));
   background: var(--surface-2);
   color: var(--text);
 }
 
+.item-btn:active {
+  transform: translateY(1px);
+}
+
+.item.is-watch .item-btn:not([aria-pressed="true"]) {
+  background: var(--surface);
+}
+
 .btn-save[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--saved) 45%, var(--border));
+  background: var(--watch-soft);
   color: var(--saved);
 }
 
@@ -851,8 +1389,23 @@ mark {
   fill: currentColor;
 }
 
+/* Unread: an empty ring (nothing done yet). Read: the ring fills with a Healthy Green check. */
+.btn-read .path-tick {
+  opacity: 0;
+}
+
 .btn-read[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--border));
+  background: var(--new-soft);
   color: var(--ok);
+}
+
+.btn-read[aria-pressed="true"] .path-tick {
+  opacity: 1;
+}
+
+.btn-read:hover:not([aria-pressed="true"]) .path-tick {
+  opacity: 0.45; /* previews what a press will do */
 }
 
 .empty {
@@ -908,7 +1461,7 @@ mark {
     position: fixed;
     inset: 0;
     z-index: 20;
-    background: rgb(0 0 0 / 40%);
+    background: var(--scrim);
   }
 
   .topbar {
@@ -928,12 +1481,83 @@ mark {
   .only-btn {
     opacity: 1;
   }
+
+  /* The drawer footer: settings as a grid of full-size targets, not a row of small links. */
+  .side-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .side-actions .link-btn {
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 14px;
+    text-align: center;
+  }
+
+  .side-actions .link-btn:hover {
+    text-decoration: none;
+    background: var(--surface-2);
+  }
 }
 
 @media (max-width: 600px) {
-  .updated,
-  .btn-label {
+  .watch-short {
+    display: inline;
+  }
+
+  .watch-btn {
+    padding: 0 10px 0 8px;
+    gap: 7px;
+  }
+
+  .watch-tally {
+    padding-left: 7px;
+  }
+
+  .watch-unit {
     display: none;
+  }
+
+  /* Phones show the source tally only when it carries news (a source is failing). */
+  .watch-btn:not(.has-failing) .watch-tally {
+    display: none;
+  }
+
+  .watch-panel {
+    position: fixed;
+    top: calc(var(--topbar-h) + 6px);
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+
+  .updated,
+  .topbar .btn-label,
+  .topbar .mark-all {
+    display: none;
+  }
+
+  .mark-all-drawer {
+    display: inline-flex;
+  }
+
+  .topbar #theme-btn {
+    display: none;
+  }
+
+  .theme-link {
+    display: inline;
+  }
+
+  /* 16px or larger, so iOS doesn't zoom the page when a field takes focus. */
+  input {
+    font-size: 16px;
   }
 
   .item {
@@ -944,17 +1568,68 @@ mark {
   .item-title {
     font-size: 16px;
   }
+
+  /* Phones: three lines of summary, so a glance covers more than two items. */
+  .item-summary {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
 }
 
 /* Touch screens have no hover, so the "only" shortcut must always be visible (it is tappable). */
 @media (hover: none) {
+  /* Keyboard shortcuts mean nothing without a keyboard. */
+  #help-btn {
+    display: none;
+  }
+
+  .icon-btn,
+  .watch-btn,
+  .search input {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   .only-btn {
     opacity: 1;
+    min-height: 32px;
+    padding: 4px 10px;
+  }
+
+  .item-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .chip-remove {
+    width: 32px;
+    height: 32px;
+  }
+
+  .check-row {
+    min-height: 40px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar {
+  .item-btn,
+  .group-heading::before,
+  .sidebar,
+  .watch-btn,
+  .watch-eyes .pupil {
     transition: none;
+  }
+
+  .watch-eyes.is-blinking .eyes-open {
+    animation: none;
+  }
+
+  .chip.is-flash {
+    animation: none;
+    outline: 2px solid var(--watch);
+    outline-offset: 1px;
   }
 }

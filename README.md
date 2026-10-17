@@ -42,7 +42,9 @@ sources.yml ─► GitHub Action (every 15 min) ─► data/feed.json ─► Git
    15 minutes. It downloads every feed in [`sources.yml`](sources.yml) and tidies titles,
    links and summaries. Then it merges them with the feed that is already live and drops
    anything older than 7 days.
-2. It publishes the result, a static page plus `data/feed.json`, to GitHub Pages.
+2. It publishes the result, a static page plus `data/feed.json`, to GitHub Pages. Just before
+   uploading, `python -m owlfeed stamp site` adds a content hash (`?v=…`) to every CSS and
+   JavaScript URL, so a reader arriving mid-deploy never mixes cached old files with new ones.
 3. The page in your browser reads `data/feed.json`. No server, database or API key is
    involved, and it costs nothing on a public repository.
 
@@ -143,6 +145,7 @@ pip install --require-hashes -r requirements.txt -r requirements-dev.txt   # pin
 python -m owlfeed build                 # fetch every feed into site/data/feed.json
 python -m owlfeed check --samples 3     # health report for every source
 python -m http.server -d site 8000      # then open http://localhost:8000
+python -m owlfeed stamp path/to/copy    # version asset URLs in a site copy (CI does this; not your working tree)
 
 python -m pytest --ignore=tests/e2e     # fetcher unit tests
 npm test                                # dashboard unit tests (Node 22+, no dependencies)

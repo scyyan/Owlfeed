@@ -95,6 +95,23 @@ def test_summary_drops_newsletter_promos():
     assert summary_text(html) == "Satellite imagery obtained by Bellingcat lays bare the extent of tree-felling at a golf course."
 
 
+def test_summary_drops_guardian_email_app_podcast_promo():
+    promo = (
+        '<ul><li><p>Get our <a href="https://www.theguardian.com/email-newsletters">{kind} email</a>, '
+        '<a href="https://app.adjust.com/x">free app</a> or '
+        '<a href="https://www.theguardian.com/podcasts">daily news podcast</a></p></li></ul>'
+    )
+    story = "<p>As house prices plateau, the gap between buying and renting is narrowing in dozens of suburbs</p>"
+    for kind in ("breaking news", "new political"):
+        expected = "As house prices plateau, the gap between buying and renting is narrowing in dozens of suburbs"
+        assert summary_text(story + promo.format(kind=kind)) == expected
+        assert summary_text(promo.format(kind=kind) + story) == expected
+    # Prose that merely starts with "Get our" is kept.
+    assert summary_text("<p>Get our attention, the protesters chanted outside parliament.</p>") == (
+        "Get our attention, the protesters chanted outside parliament."
+    )
+
+
 def test_summary_joins_paragraphs_as_sentences():
     html = (
         "<p>Attack was the first on the palace in the latest fighting between the Houthis and Saudi Arabia</p>"

@@ -1,4 +1,4 @@
-"""Command line: `python -m owlfeed build` and `python -m owlfeed check`."""
+"""Command line: `python -m owlfeed build`, `check` and `stamp`."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import feedparser
 from .config import Config, ConfigError, Source, load_config
 from .fetch import fetch_all
 from .parse import Entry, FeedParseError, parse_feed
+from .stamp import stamp_site
 from .store import (
     AllSourcesFailed,
     PreviousStateError,
@@ -241,6 +242,16 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 1 if args.strict and failures else 0
 
 
+def cmd_stamp(args: argparse.Namespace) -> int:
+    try:
+        version = stamp_site(Path(args.site))
+    except FileNotFoundError as exc:
+        log.error("%s", exc)
+        return 2
+    log.info("Stamped %s with version %s", args.site, version)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="owlfeed", description="Build the Owlfeed dashboard data.")
     parser.add_argument("--sources", default="sources.yml", help="path to sources.yml")
@@ -262,6 +273,10 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--strict", action="store_true", help="exit 1 if any enabled source fails")
     check.add_argument("--inspect", action="append", metavar="ID", help="dump raw details for a source (repeatable)")
     check.set_defaults(func=cmd_check)
+
+    stamp = commands.add_parser("stamp", help="version CSS/JS URLs in a site directory before publishing")
+    stamp.add_argument("site", nargs="?", default="site", help="the site directory to rewrite in place")
+    stamp.set_defaults(func=cmd_stamp)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)

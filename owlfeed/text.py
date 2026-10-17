@@ -70,6 +70,8 @@ JUNK_MAX_CHARS = 300
 _JUNK_PARAGRAPH = re.compile(
     r"^(?:"
     r"sign up (?:for|to|now|here|today)\b|subscribe (?:to|now|for|here|today)\b|click here (?:to|for)\b"
+    # The Guardian: "Get our breaking news email, free app or daily news podcast".
+    r"|get our (?:[\w'’-]+ ){1,4}(?:email|newsletter)s?\b"
     r"|read more\b|continue reading\b|keep reading\b"
     r"|the (?:post|article) .+ (?:appeared|was published) first on\b"
     r"|this (?:article|story|post) (?:was )?(?:originally|first) (?:appeared|published)\b"

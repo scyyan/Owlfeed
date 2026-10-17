@@ -75,6 +75,12 @@ jobs:
           path: .state/feed.json
           retention-days: 3
           if-no-files-found: error
+      - name: Version CSS and JavaScript URLs
+        # Adds ?v=<content hash> to every stylesheet, script and module import in this
+        # checkout's site/, so a reader arriving mid-deploy never pairs cached old files with
+        # new ones (Pages lets browsers cache for ~10 minutes). The checkout is thrown away
+        # after the run, so the repository itself is never stamped.
+        run: python -m owlfeed stamp site
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site
