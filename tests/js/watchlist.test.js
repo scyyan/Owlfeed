@@ -53,3 +53,17 @@ test('parts covers the whole text', () => {
   assert.equal(matcher.parts(text).filter((p) => p.match).length, 3);
   assert.deepEqual(matcher.parts('nothing here'), [{ text: 'nothing here', match: false }]);
 });
+
+test('a trailing * matches longer words; plain terms stay whole-word', () => {
+  const matcher = buildMatcher(['Russia*', 'APT2']);
+  assert.deepEqual(matcher.match('Russian hackers and Russia’s army'), ['Russia*']);
+  assert.deepEqual(matcher.match('APT28 is not APT2s'), []);
+  assert.deepEqual(matcher.ranges('Russians'), [[0, 8]]);
+  assert.deepEqual(buildMatcher(['Belarus']).match('Belarusian forces'), []);
+});
+
+test('normalizeTerm tidies stars and a lone star is ignored', () => {
+  assert.equal(normalizeTerm('Russia **'), 'Russia*');
+  assert.equal(buildMatcher(['*']), null);
+  assert.deepEqual(buildMatcher(['C++']).match('C++ bug'), ['C++']);
+});

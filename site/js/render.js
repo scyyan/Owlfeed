@@ -1,22 +1,30 @@
 // DOM building. All feed text goes through textContent / text nodes, never innerHTML.
 
+import { highlightSegments, queryRanges } from './filters.js';
 import { clockTime, dayKey, dayLabel, fullTime, relativeTime, updatedLabel } from './time.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ICON_PATHS = {
   star: 'M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6L12 16.6l-5 2.6.9-5.6-4-3.9 5.6-.8z',
   check: 'M5 12.5l4.5 4.5L19 7.5',
+  // Read toggle: an empty ring while unread; the check inside appears once read (see CSS).
+  ring: 'M12 4.25a7.75 7.75 0 1 0 0 15.5 7.75 7.75 0 0 0 0-15.5z',
+  tick: 'M8.4 12.3l2.5 2.5 4.8-5.1',
   close: 'M6 6l12 12M18 6L6 18',
+  eye: 'M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12zM12 9.25a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5z',
 };
 
-export function icon(name) {
+export function icon(name, ...extra) {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('class', `icon icon-${name}`);
-  const path = document.createElementNS(SVG_NS, 'path');
-  path.setAttribute('d', ICON_PATHS[name]);
-  svg.append(path);
+  for (const part of [name, ...extra]) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', ICON_PATHS[part]);
+    path.setAttribute('class', `path-${part}`);
+    svg.append(path);
+  }
   return svg;
 }
 
@@ -41,13 +49,20 @@ export function slug(text) {
   return String(text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'other';
 }
 
-export function appendHighlighted(parent, text, matcher) {
-  if (!matcher) {
+/** Watchlist terms and search matches, layered: each gets its own <mark> style. */
+export function appendHighlighted(parent, text, { matcher, tokens } = {}) {
+  if (!matcher && !tokens?.length) {
     parent.append(text);
     return;
   }
-  for (const part of matcher.parts(text)) {
-    parent.append(part.match ? el('mark', null, part.text) : part.text);
+  const layers = { watch: matcher ? matcher.ranges(text) : [], search: queryRanges(text, tokens) };
+  for (const segment of highlightSegments(text, layers)) {
+    if (!segment.kinds.length) {
+      parent.append(segment.text);
+      continue;
+    }
+    const mark = el('mark', segment.kinds.map((kind) => `hl-${kind}`).join(' '), segment.text);
+    parent.append(mark);
   }
 }
 
@@ -55,25 +70,29 @@ function separator() {
   return el('span', 'sep', '·');
 }
 
+/**
+ * Toggle buttons keep one name; aria-pressed carries the state. (Changing the name as well makes
+ * screen readers announce the state twice: "Remove from saved, pressed".) The tooltip says what a
+ * click will do.
+ */
 export function setActionState(button, pressed) {
   const kind = button.dataset.action;
-  const label =
-    kind === 'save' ? (pressed ? 'Remove from saved' : 'Save for later') : pressed ? 'Mark as unread' : 'Mark as read';
   button.setAttribute('aria-pressed', String(pressed));
-  button.setAttribute('aria-label', label);
-  button.title = label;
+  button.setAttribute('aria-label', kind === 'save' ? 'Save for later' : 'Mark as read');
+  button.title =
+    kind === 'save' ? (pressed ? 'Saved: click to remove' : 'Save for later') : pressed ? 'Read: click to mark unread' : 'Mark as read';
 }
 
 function actionButton(kind, pressed) {
   const button = el('button', `item-btn btn-${kind}`);
   button.type = 'button';
   button.dataset.action = kind;
-  button.append(icon(kind === 'save' ? 'star' : 'check'));
+  button.append(kind === 'save' ? icon('star') : icon('ring', 'tick'));
   setActionState(button, pressed);
   return button;
 }
 
-/** ctx: { now, matcher, isRead(id), isSaved(id), isNew(item) } */
+/** ctx: { now, matcher, tokens, isRead(id), isSaved(id), isNew(item) } */
 export function itemElement(item, ctx) {
   const article = el('article', 'item');
   article.dataset.id = item.id;
@@ -91,10 +110,11 @@ export function itemElement(item, ctx) {
     target.href = href;
     target.target = '_blank';
     target.rel = 'noopener noreferrer';
+    target.setAttribute('aria-describedby', 'new-tab-hint');
   } else {
     target = el('span');
   }
-  appendHighlighted(target, item.title, ctx.matcher);
+  appendHighlighted(target, item.title, ctx);
   heading.append(target);
 
   const meta = el('div', 'item-meta');
@@ -109,12 +129,17 @@ export function itemElement(item, ctx) {
   age.dataset.ms = String(item.publishedMs);
   meta.append(source, separator(), time, separator(), age);
   if (isNew) meta.append(el('span', 'badge badge-new', 'New'));
-  for (const term of item.watch) meta.append(el('span', 'badge badge-watch', term));
+  for (const term of item.watch) {
+    const badge = el('span', 'badge badge-watch');
+    badge.title = `Matches your watchlist term “${term}”`;
+    badge.append(icon('eye'), el('span', 'sr-only', 'Watchlist: '), term);
+    meta.append(badge);
+  }
 
   body.append(heading, meta);
   if (item.summary) {
     const summary = el('p', 'item-summary');
-    appendHighlighted(summary, item.summary, ctx.matcher);
+    appendHighlighted(summary, item.summary, ctx);
     body.append(summary);
   } else {
     body.append(el('p', 'item-summary is-empty', 'No summary provided by the source.'));
@@ -210,45 +235,62 @@ export function refreshAges(root, now) {
   }
 }
 
-function checkRow({ attr, value, checked, label, count, dotClass, dotTitle }) {
+function checkRow({ attr, value, checked, label, count, dotClass, dotTitle, dotText }) {
   const row = el('label', 'check-row');
   const input = el('input');
   input.type = 'checkbox';
   input.dataset[attr] = value;
   input.checked = checked;
   const dot = el('span', dotClass);
-  if (dotTitle) dot.title = dotTitle;
-  row.append(input, dot, el('span', 'row-label', label), el('span', 'count', String(count)));
+  if (dotTitle) dot.title = dotTitle; // a mouse tooltip only; dotText says it for screen readers
+  if (dotText) dot.setAttribute('aria-hidden', 'true');
+  const name = el('span', 'row-label', label);
+  // The dot's meaning in words, for screen readers (a title alone is never announced reliably).
+  if (dotText) name.append(el('span', 'sr-only', `, ${dotText}`));
+  row.append(input, dot, name, el('span', 'count', String(count)));
   return row;
 }
 
-export function renderCategories(list, categories, hidden, counts) {
+/**
+ * Category checkboxes agree with the source filters: checked when all of a category's sources are
+ * shown, mixed (indeterminate) when only some are, empty when none are or the category is hidden.
+ * The count is what that category shows now. sourceState: Map(category -> { shown, total }).
+ */
+export function renderCategories(list, categories, hidden, counts, sourceState = new Map()) {
   list.replaceChildren(
     ...categories.map((category) => {
       const li = el('li');
-      li.append(
-        checkRow({
-          attr: 'category',
-          value: category,
-          checked: !hidden.has(category),
-          label: category,
-          count: counts.get(category) ?? 0,
-          dotClass: `cat-dot cat-${slug(category)}`,
-        }),
-      );
+      const { shown = 1, total = 1 } = sourceState.get(category) ?? {};
+      const visible = !hidden.has(category) && shown > 0;
+      const row = checkRow({
+        attr: 'category',
+        value: category,
+        checked: visible && shown === total,
+        label: category,
+        count: visible ? counts.get(category) ?? 0 : 0,
+        dotClass: `cat-dot cat-${slug(category)}`,
+      });
+      const input = row.querySelector('input');
+      input.indeterminate = visible && shown < total;
+      if (input.indeterminate) row.title = `${shown} of ${total} ${category} sources shown`;
+      li.append(row);
       return li;
     }),
   );
 }
 
-function healthTitle(source, now) {
+export function healthTitle(source, now) {
   if (source.status === 'ok') return 'Fetched successfully on the last refresh';
   const last = Date.parse(source.last_ok);
   const since = Number.isFinite(last) ? ` Last success ${updatedLabel(last, now)}.` : ' No successful fetch yet.';
   return `Last refresh failed: ${source.error || 'unknown error'}.${since}`;
 }
 
-export function renderSources(container, sources, { hiddenSources, hiddenCategories, counts, now }) {
+/**
+ * Sources grouped under collapsible headings. openGroups holds the groups the reader opened; a
+ * group with a failing source or a partial selection opens by itself.
+ */
+export function renderSources(container, sources, { hiddenSources, hiddenCategories, counts, now, openGroups }) {
   const groups = new Map();
   for (const source of sources) {
     const key = `${source.category} › ${source.group}`;
@@ -257,9 +299,23 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
   }
   const nodes = [];
   for (const group of groups.values()) {
-    const wrapper = el('div', 'source-group');
+    const wrapper = el('details', 'source-group');
+    wrapper.dataset.group = group.title;
     wrapper.classList.toggle('is-muted', hiddenCategories.has(group.category));
-    wrapper.append(el('h3', 'group-heading', group.title));
+    const categoryHidden = hiddenCategories.has(group.category);
+    // A hidden category shows none of its sources, whatever their own checkboxes say.
+    const shown = categoryHidden ? 0 : group.sources.filter((s) => !hiddenSources.has(s.id)).length;
+    const failing = group.sources.filter((s) => s.status !== 'ok').length;
+    // Open what needs a look: a failing source, or a partial selection. A group that is all on or
+    // all off says everything in its tally ("10/10", "0/7"), so it stays folded.
+    const partial = shown > 0 && shown < group.sources.length;
+    wrapper.open = openGroups.has(group.title) || failing > 0 || partial;
+    const summary = el('summary', 'group-heading');
+    summary.append(el('span', 'group-title', group.title));
+    const tally = el('span', `group-tally${failing ? ' is-error' : ''}`, `${shown}/${group.sources.length}`);
+    tally.title = `${shown} of ${group.sources.length} sources shown${failing ? `, ${failing} not answering` : ''}`;
+    summary.append(tally);
+    wrapper.append(summary);
     const list = el('ul', 'source-list');
     for (const source of group.sources) {
       const li = el('li', 'source-row');
@@ -273,6 +329,7 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
           count: counts.get(source.id) ?? 0,
           dotClass: `health-dot ${source.status === 'ok' ? 'is-ok' : 'is-error'}`,
           dotTitle: healthTitle(source, now),
+          dotText: source.status === 'ok' ? 'answering' : `not answering: ${healthTitle(source, now)}`,
         }),
       );
       const only = el('button', 'only-btn', 'only');
@@ -302,30 +359,4 @@ export function renderWatchTerms(list, terms) {
       return li;
     }),
   );
-}
-
-/** options.open keeps the failing-sources list expanded across re-renders; options.updated is shown too. */
-export function renderHealth(container, sources, now, { open = false, updated = '', stale = false } = {}) {
-  const failing = sources.filter((s) => s.status !== 'ok');
-  const summary = el('p', 'health-summary');
-  summary.append(
-    el('span', `health-dot ${failing.length ? 'is-error' : 'is-ok'}`),
-    `${sources.length - failing.length} of ${sources.length} sources OK`,
-  );
-  const nodes = [summary];
-  if (updated) nodes.push(el('p', `health-updated${stale ? ' is-stale' : ''}`, updated));
-  if (failing.length) {
-    const details = el('details', 'health-details');
-    details.open = open;
-    details.append(el('summary', null, `${failing.length} failing`));
-    const list = el('ul');
-    for (const source of failing) {
-      const li = el('li');
-      li.append(el('strong', null, source.name), ` ${healthTitle(source, now)}`);
-      list.append(li);
-    }
-    details.append(list);
-    nodes.push(details);
-  }
-  container.replaceChildren(...nodes);
 }
