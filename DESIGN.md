@@ -120,8 +120,8 @@ components:
     backgroundColor: "{colors.owls-eye-amber-soft}"
     textColor: "{colors.saved-amber}"
   item-action-read:
-    backgroundColor: "{colors.fresh-green-soft}"
-    textColor: "{colors.healthy-green}"
+    backgroundColor: "transparent"
+    textColor: "{colors.slate-muted}"
   watch-status:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink-soft}"
@@ -212,8 +212,9 @@ mean exactly one thing.
 
 ### Primary
 - **Night Sky Blue** (#2453c8 light; #7aa5ff dark): action and current state. It marks the
-  selected sidebar view (on its soft tint, #e7edfb / #1a2640), title hover, link buttons,
-  checkbox accents, focus rings and the "↑ N new items" pill.
+  selected sidebar view and phone tab (on its soft tint, #e7edfb / #1a2640), title hover, link
+  buttons, checkbox accents, focus rings, the "↑ N new items" pill, and the 6px unread dot beside
+  an unread headline (still to do is a current state).
 
 ### Secondary
 - **Owl's-Eye Amber** (#a15c00 light; #f5c451 dark): what the owl has noticed. It's used for
@@ -227,7 +228,8 @@ mean exactly one thing.
 ### Tertiary
 - **Fresh Green** (#0f6e33 light; #4ade80 dark), on its soft tint (#dff4e6 / #12311f): new since
   last visit. It's used for the NEW badge. **Healthy Green** (#16a34a)
-  marks a source that refreshed successfully and an item marked read.
+  marks a source that refreshed successfully. Read is not a signal: it is the quiet state
+  (Slate Muted), so green never fills the timeline's most common row.
 - **Alarm Rust** (#b93d06 light; #fb8b4b dark): something is wrong. It's used for failing-source
   dots and labels, the "updated N hours ago" warning, and the stale-data banner.
 
@@ -258,8 +260,8 @@ mean exactly one thing.
 
 ### Named Rules
 **The One Meaning Rule.** Each signal hue means one thing everywhere, and categories keep to
-cool hues (blue, teal, violet) so they can never be mistaken for a signal. Green is new, healthy or
-read, amber is watchlist or saved, rust is failure, blue is action, search or Cyber. Never use one decoratively,
+cool hues (blue, teal, violet) so they can never be mistaken for a signal. Green is new or healthy,
+amber is watchlist or saved, rust is failure, blue is action, search, unread or Cyber. Never use one decoratively,
 and never give a second meaning to a hue that already has one.
 
 **The Twin Watch Rule.** Every color token ships in a light and a dark value, and both pass WCAG
@@ -325,8 +327,11 @@ padding. Sidebar rows are compact (4–8px vertical padding), and items breathe 
   source is failing), the theme toggle moves into the drawer as a text link, inputs are 16px (so
   iOS never zooms on focus), "Mark N read" moves into
   the drawer, the search placeholder shortens to "Search", item padding tightens to 12px/10px,
-  titles drop to 17px, summaries clamp to three lines, compact-row actions stack, and an idle
-  bar above the timeline names the current view ("328 items · All items").
+  titles drop to 17px, and summaries clamp to three lines. Headlines and summaries run the full
+  row width; save and read sit side by side at the end of the meta line. Rows start compact
+  until the reader picks a density. A **tab bar** fixed to the bottom (All, New, Hits, Saved with
+  their counts, plus Filters, which opens the drawer) replaces the top-left menu button, keeps
+  the main views within thumb reach, and names the current view, so the idle bar is hidden.
 - **Drawer footer on touch:** settings links become a two-column grid of 44px bordered targets,
   and "Shortcuts" is hidden (it only helps with a keyboard).
 - **Touch (`hover: none`):** controls that only appear on hover, such as the source "only"
@@ -433,8 +438,10 @@ is a meta row: the source name at 650 weight in its category ink with its dot, t
 the relative age, and badges (the watchlist badge carries a drawn eye). Then comes the summary.
 Save (star) and read (ring) buttons are stacked on the right as firm 34px squares. The keyboard
 cursor (Tab or j/k) tints the whole row with Night Sky Blue's soft tint, not just the headline. Saved fills
-the star in Saved Amber on the amber tint. Unread is an empty ring; read fills it with a Healthy
-Green check on the green tint. Read items fade the headline and summary to Slate Muted. Undated
+the star in Saved Amber on the amber tint. Unread rows carry the mark: a 6px Night Sky Blue dot
+in the gutter, centred on the headline's first line (none in the Unread view, where every row is
+unread). Read is the quiet state: the ring fills with a Slate Muted check, with no tint, and the
+headline and summary fade to Slate Muted. Undated
 items show a `~` before their time. Search matches are underlined in Night Sky Blue on its soft
 tint; watchlist terms keep Highlight Gold. Where both cover the same word, the watchlist mark wins
 and the search underline is dropped: two highlight styles never stack. Search and the watchlist
@@ -446,9 +453,9 @@ top bar, "Compact rows" in the phone drawer, or `d`) shows headline and meta onl
 and the actions side by side at 30px (44px on touch); the focused row reveals its summary. The
 choice is saved with the reader's preferences.
 
-**Quiet actions.** With a mouse, save and read buttons that haven't been used rest as bare Slate
-Muted icons and firm up (Paper, hairline) when the row is hovered or focused. Saved and read
-always show their tint. Touch keeps the firm 44px buttons.
+**Quiet actions.** With a mouse, the read button and an unused save button rest as bare Slate
+Muted icons and firm up (Paper, hairline) when the row is hovered or focused. Only saved always
+shows its tint. Touch keeps the firm 44px buttons.
 
 **Watchlist chips are filters.** The chip body is a toggle with a tabular hit count: pressed, the
 Watchlist hits view shows that term alone (2px Owl's-Eye Amber outline, filled count). A term with
@@ -495,7 +502,16 @@ them (never three or four bars, which read as the menu). At 1000px and below, "M
 its count beside the double check ("✓✓ 328"). On phones in compact mode only the star shows: rows
 stay one tap target tall, opening an item marks it read, and "Mark these N read" closes out a list.
 
-**Glossary.** "What the labels mean" defines New, Unread, Just arrived, Read (the ring and check), Saved
+**Saved is an archive.** When category or source filters hide some saved items, the filter bar
+says how many ("2 saved items hidden by your filters") with "Show them".
+
+**Starting up.** A plain script (`js/boot-check.js`) outside the module graph watches the start:
+if one of the site's scripts fails or the app hasn't started within 10 seconds, "Loading…"
+becomes "Owlfeed couldn't start" with a Reload button, announced to screen readers. Without
+JavaScript a `<noscript>` empty state says so. While the feed loads, the sidebar's category and
+source lists show muted placeholder bars.
+
+**Glossary.** "What the labels mean" defines New, Unread (the dot), Just arrived, Read (the ring and check), Saved
 (the star) and a watchlist hit (the amber row and eye badge), each drawn with its real glyph.
 
 **Help on touch screens.** The drawer's "What the labels mean" opens the help dialog, which on

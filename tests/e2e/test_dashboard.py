@@ -318,7 +318,7 @@ def test_drawer_is_modal_on_phones(make_page, server):
     assert page.evaluate("document.getElementById('main').inert") is True
     assert page.evaluate("document.getElementById('sidebar').inert") is False
     page.keyboard.press("Escape")
-    assert page.evaluate("document.activeElement.id") == "menu-btn"
+    assert page.evaluate("document.activeElement.id") == "tab-filters"
     assert page.evaluate("document.getElementById('sidebar').inert") is True
 
     page.get_by_role("button", name="Open views and filters").click()
@@ -1084,3 +1084,55 @@ def test_a_match_past_the_visible_lines_is_shown_as_a_snippet(page, server):
     expect(summary).to_have_class(re.compile(r"\bis-snippet\b"))
     expect(summary).to_have_text(re.compile(r"^…"))
     expect(summary.locator("mark.hl-search")).to_have_text("certificates")
+
+
+def test_phone_tab_bar_switches_views_and_rows_start_compact(make_page, server):
+    page = make_page(viewport=(390, 844))
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    # No density chosen yet: a phone starts compact, with the headline across the full width.
+    expect(page.locator("#feed")).to_have_attribute("data-density", "compact")
+    tabbar = page.locator("#tabbar")
+    expect(tabbar).to_be_visible()
+    expect(page.locator("#menu-btn")).to_be_hidden()
+    tabbar.locator('[data-tab="saved"]').click()
+    expect(tabbar.locator('[data-tab="saved"]')).to_have_attribute("aria-current", "true")
+    expect(page.locator('.view-btn[data-view="saved"]')).to_have_attribute("aria-current", "true")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+
+
+def test_wide_screens_keep_comfortable_rows_and_no_tab_bar(page, server):
+    open_dashboard(page, server)
+    expect(page.locator("#feed")).to_have_attribute("data-density", "comfortable")
+    expect(page.locator("#tabbar")).to_be_hidden()
+
+
+def test_a_module_that_fails_to_load_shows_a_reload_message(page, server):
+    # An older or missing copy of one module stops the app: the page says so instead of "Loading…".
+    page.route("**/js/render.js*", lambda route: route.abort())
+    page.goto(server.url)
+    expect(page.locator(".empty-title", has_text="Owlfeed couldn’t start")).to_be_visible()
+    expect(page.locator("#feed")).to_have_attribute("aria-busy", "false")
+    expect(page.get_by_role("button", name="Reload")).to_be_visible()
+    page.js_errors.clear()  # the failed load is the point of this test
+
+
+def test_a_started_app_never_shows_the_failure_message(page, server):
+    page.clock.install()
+    open_dashboard(page, server)
+    assert page.evaluate("document.documentElement.dataset.app") == "ready"
+    page.clock.run_for(11_000)  # past the watchdog's grace period
+    expect(page.locator(".empty-title", has_text="Owlfeed couldn’t start")).to_have_count(0)
+
+
+def test_saved_view_says_when_filters_hide_saved_items(page, server):
+    open_dashboard(page, server)
+    page.locator("article.item", has=page.locator(".item-source", has_text="Sample CERT")).first.get_by_role("button", name="Save for later").click()
+    page.locator("article.item", has=page.locator(".item-source", has_text="Sample World Desk")).first.get_by_role("button", name="Save for later").click()
+    page.locator('[data-category="Geopolitics"]').uncheck()
+    page.locator('.view-btn[data-view="saved"]').click()
+    expect(page.locator("article.item")).to_have_count(1)
+    note = page.locator("#active-filters .filters-widened")
+    expect(note).to_contain_text("1 saved item hidden by your filters")
+    note.get_by_role("button", name="Show them").click()
+    expect(page.locator("article.item")).to_have_count(2)

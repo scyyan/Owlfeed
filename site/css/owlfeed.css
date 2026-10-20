@@ -282,6 +282,7 @@ kbd {
   top: 0;
   height: 100vh;
   overflow-y: auto;
+  scrollbar-gutter: stable; /* content doesn't shift when the list grows past the screen */
   padding: 16px 14px 24px;
   background: var(--surface);
   border-right: 1px solid var(--border);
@@ -476,7 +477,8 @@ kbd {
 
 .only-btn {
   opacity: 0;
-  padding: 1px 6px;
+  min-height: 24px;
+  padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
@@ -661,8 +663,19 @@ kbd {
 }
 
 .glyph-read {
-  background: var(--new-soft);
-  color: var(--ok);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+/* The unread dot, as drawn beside a headline. */
+.glyph-unread {
+  display: inline-block;
+  vertical-align: middle;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 .glyph-saved {
@@ -839,6 +852,24 @@ kbd {
   text-decoration: underline;
 }
 
+/* Small text links keep their look but get a taller target (the margin gives the height back). */
+.side-actions .link-btn,
+.side-heading-row .link-btn,
+.stale-dismiss {
+  padding: 6px 0;
+  margin: -6px 0;
+}
+
+/* While the feed loads, the sidebar's lists show where their rows will be. */
+.app:has(#feed[aria-busy="true"]) :is(#category-list, #source-list):empty::before {
+  content: "";
+  display: block;
+  height: 56px;
+  margin: 2px 8px 0;
+  border-radius: 4px;
+  background: repeating-linear-gradient(to bottom, var(--surface-2) 0 14px, transparent 14px 28px);
+}
+
 /* Theme toggle shows the mode you would switch to. */
 .icon-sun {
   display: none;
@@ -878,6 +909,11 @@ kbd {
 }
 
 .topbar .menu-btn {
+  display: none;
+}
+
+/* The phone tab bar (shown under 600px). */
+.tabbar {
   display: none;
 }
 
@@ -1761,19 +1797,19 @@ mark.hl-watch.hl-search {
  * row is hovered or focused; saved and read always show. Touch keeps the firm buttons.
  */
 @media (hover: hover) {
-  .item .item-btn:not([aria-pressed="true"]) {
+  .item .item-btn:not(.btn-save[aria-pressed="true"]) {
     border-color: transparent;
     background: transparent;
     color: var(--muted);
   }
 
-  .item:is(:hover, :focus-within) .item-btn:not([aria-pressed="true"]) {
+  .item:is(:hover, :focus-within) .item-btn:not(.btn-save[aria-pressed="true"]) {
     border-color: var(--border);
     background: var(--surface);
     color: var(--text-2);
   }
 
-  .item .item-btn:not([aria-pressed="true"]):hover {
+  .item .item-btn:not(.btn-save[aria-pressed="true"]):hover {
     border-color: color-mix(in srgb, var(--text-2) 45%, var(--border));
     background: var(--surface-2);
     color: var(--text);
@@ -1830,15 +1866,36 @@ mark.hl-watch.hl-search {
   fill: currentColor;
 }
 
-/* Unread: an empty ring (nothing done yet). Read: the ring fills with a Healthy Green check. */
+/*
+ * Unread is what the reader still has to do, so unread rows carry the mark: a Night Sky Blue dot
+ * in the gutter beside the headline. Read is the quiet state: the headline fades and the ring
+ * fills with a muted check, with no tint. (In the Unread view every row is unread: no dots.)
+ */
 .btn-read .path-tick {
   opacity: 0;
 }
 
 .btn-read[aria-pressed="true"] {
-  border-color: color-mix(in srgb, var(--ok) 40%, var(--border));
-  background: var(--new-soft);
-  color: var(--ok);
+  color: var(--muted);
+}
+
+.item-title {
+  position: relative;
+}
+
+.item:not(.is-read) .item-title::before {
+  content: "";
+  position: absolute;
+  top: calc(0.675em - 3px); /* centred on the first line (line-height 1.35) */
+  left: -11px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.feed[data-showing="unread"] .item .item-title::before {
+  content: none;
 }
 
 .btn-read[aria-pressed="true"] .path-tick {
@@ -1867,6 +1924,11 @@ mark.hl-watch.hl-search {
 .empty-detail {
   margin: 0 0 14px;
   color: var(--muted);
+}
+
+/* Without JavaScript the app never starts: the <noscript> note replaces the loading line. */
+html:not([data-app]) .loading {
+  display: none;
 }
 
 .sentinel {
@@ -1987,6 +2049,7 @@ mark.hl-watch.hl-search {
 
   .side-actions .link-btn {
     min-height: 44px;
+    margin: 0;
     padding: 0 10px;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -2101,7 +2164,7 @@ mark.hl-watch.hl-search {
   }
 
   .item {
-    padding: 12px 10px 12px 13px;
+    padding: 12px 10px 12px 16px;
     gap: 2px 8px;
   }
 
@@ -2116,11 +2179,128 @@ mark.hl-watch.hl-search {
   }
 
   .feed[data-density="compact"] .item {
-    padding: 6px 8px 6px 13px;
+    padding: 6px 8px 6px 16px;
   }
 
   .feed[data-density="compact"] .item-title {
     font-size: 15.5px;
+  }
+
+  /*
+   * The headline and summary take the full width; save and read sit side by side at the end of
+   * the meta line instead of stacking down the right edge.
+   */
+  .item-body {
+    display: contents;
+  }
+
+  .item-title,
+  .item-summary {
+    grid-column: 1 / -1;
+  }
+
+  .item-meta {
+    grid-column: 1;
+    margin: 2px 0;
+  }
+
+  .item-actions,
+  .feed[data-density="compact"] .item-actions {
+    flex-direction: row;
+    gap: 6px;
+    grid-row: 2;
+    grid-column: 2;
+    align-self: center;
+  }
+
+  .feed[data-density="compact"] .item-meta {
+    margin: 0;
+  }
+
+  /* The tab bar names the view, so the idle bar would only repeat it. */
+  .active-filters.is-idle {
+    display: none;
+  }
+
+  /* Filters in the tab bar opens the drawer; the top bar keeps its width for status and search. */
+  .topbar .menu-btn {
+    display: none;
+  }
+
+  .tabbar {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 15;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    padding: 5px max(8px, env(safe-area-inset-right)) max(5px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+  }
+
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    min-height: 48px;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+
+  .tab:active {
+    background: var(--hover-tint);
+  }
+
+  .tab-label {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .tab .count {
+    line-height: 1.2;
+  }
+
+  .tab[aria-current="true"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .tab[aria-current="true"] .count {
+    color: var(--accent);
+  }
+
+  .tab-filters .icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .tab-filters[aria-expanded="true"] {
+    color: var(--accent);
+  }
+
+  .content {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  /* Toasts and Undo sit above the tab bar, not over it. */
+  .status {
+    bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  /* "Hide for now" keeps its small look but gets a full-height tap target. */
+  .stale-dismiss {
+    min-height: 44px;
+    margin: -12px -6px;
+    padding: 0 6px;
   }
 }
 

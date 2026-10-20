@@ -51,7 +51,7 @@ const state = {
   retryTimer: null,
 };
 if (!VIEWS.includes(state.prefs.view)) state.prefs.view = 'all';
-if (!DENSITIES.includes(state.prefs.density)) state.prefs.density = 'comfortable';
+applyDefaultDensity();
 
 // Source groups the reader expanded this visit (collapsed by default to keep the sidebar short).
 const openGroups = new Set();
@@ -727,6 +727,22 @@ function renderActiveFilters(count) {
     note.append(exact);
     nodes.push(note);
   }
+  // Saved is the reader's own archive: when category or source filters hide some of it, say how
+  // many, with the way to show them.
+  if (state.prefs.view === 'saved' && count > 0 && (state.prefs.hiddenCategories.length || state.prefs.hiddenSources.length)) {
+    const unfiltered = filterContext('saved');
+    unfiltered.hiddenCategories = new Set();
+    unfiltered.hiddenSources = new Set();
+    const hidden = filterItems(itemsForView('saved'), unfiltered).length - count;
+    if (hidden > 0) {
+      const note = ui.el('span', 'filters-widened', `${plural(hidden, 'saved item')} hidden by your filters. `);
+      const show = ui.el('button', 'link-btn', 'Show them');
+      show.type = 'button';
+      show.dataset.emptyAction = 'show-saved';
+      note.append(show);
+      nodes.push(note);
+    }
+  }
   // Whole words can miss variants ("Zelensky" vs "Zelenskyy"): when the prefix form finds more,
   // say how many more, one click away. Otherwise, for several bare words, the phrase tip.
   const query = state.query.trim();
@@ -930,10 +946,12 @@ function renderSidebar() {
   $('sidebar').classList.toggle('is-searching', state.tokens.length > 0);
   for (const view of VIEWS) {
     const count = filterItems(itemsForView(view, saved), filterContext(view, state.tokens, { watchTerm: null })).length;
-    const button = document.querySelector(`[data-view="${view}"]`);
-    button.querySelector('.count').textContent = String(count);
-    if (view === state.prefs.view) button.setAttribute('aria-current', 'true');
-    else button.removeAttribute('aria-current');
+    // The sidebar row and, on phones, its tab in the bottom bar.
+    for (const button of document.querySelectorAll(`[data-view="${view}"], [data-tab="${view}"]`)) {
+      button.querySelector('.count').textContent = String(count);
+      if (view === state.prefs.view) button.setAttribute('aria-current', 'true');
+      else button.removeAttribute('aria-current');
+    }
   }
   const since = baselineLabel(now);
   document.querySelector('[data-view="new"]').title = state.firstVisit
@@ -1243,6 +1261,13 @@ function toggleTheme() {
 }
 
 // ── Density ─────────────────────────────────────────────────────────────────
+// Until the reader picks a density, phones start compact (more headlines per screen) and wider
+// screens start comfortable.
+function applyDefaultDensity() {
+  if (DENSITIES.includes(state.prefs.density)) return;
+  state.prefs.density = window.matchMedia('(max-width: 600px)').matches ? 'compact' : 'comfortable';
+}
+
 // Comfortable (headline, meta, two-line summary) is the default; compact is headlines and meta
 // only, for a fast briefing scan or a second screen. A focused row shows its summary.
 function syncDensity() {
@@ -1283,10 +1308,15 @@ function syncDrawer() {
   }
 }
 
-function openDrawer() {
+// The button that opened the drawer (the top-bar menu, or Filters in the phone tab bar) gets focus back.
+let drawerOpener = null;
+const drawerButtons = () => [$('menu-btn'), $('tab-filters')];
+
+function openDrawer(event) {
+  drawerOpener = event?.currentTarget ?? null;
   document.body.classList.add('drawer-open');
   $('scrim').hidden = false;
-  $('menu-btn').setAttribute('aria-expanded', 'true');
+  for (const button of drawerButtons()) button.setAttribute('aria-expanded', 'true');
   syncDrawer();
   $('sidebar-close').focus();
 }
@@ -1295,9 +1325,14 @@ function closeDrawer({ returnFocus = true } = {}) {
   if (!document.body.classList.contains('drawer-open')) return;
   document.body.classList.remove('drawer-open');
   $('scrim').hidden = true;
-  $('menu-btn').setAttribute('aria-expanded', 'false');
+  for (const button of drawerButtons()) button.setAttribute('aria-expanded', 'false');
   syncDrawer();
-  if (returnFocus && narrow.matches) $('menu-btn').focus();
+  if (returnFocus && narrow.matches) {
+    const shown = (button) => button?.getClientRects().length > 0;
+    const target = shown(drawerOpener) ? drawerOpener : drawerButtons().find(shown);
+    target?.focus();
+  }
+  drawerOpener = null;
 }
 
 // ── Backup / restore ────────────────────────────────────────────────────────
@@ -1314,6 +1349,7 @@ function exportSettings() {
 
 function reloadFromStorage() {
   state.prefs = storage.prefs();
+  applyDefaultDensity();
   if (!VIEWS.includes(state.prefs.view)) state.prefs.view = 'all';
   state.terms = storage.watchlist();
   recomputeWatch();
@@ -1589,6 +1625,10 @@ function wireEvents() {
     const emptyAction = event.target.closest('[data-empty-action]')?.dataset.emptyAction;
     if (token) clearFilter(token, event);
     else if (emptyAction === 'suggest' && state.suggestion) applySuggestion();
+    else if (emptyAction === 'show-saved') {
+      state.prefs.hiddenCategories = [];
+      clearFilter('sources', event);
+    }
     else if (emptyAction === 'exact' && state.widened) {
       state.exactQuery = state.widened.from;
       setQuery(state.query);
@@ -1625,6 +1665,11 @@ function wireEvents() {
     focusFirstItem(); // the pill hides itself; continue from the newest item
   });
   $('menu-btn').addEventListener('click', openDrawer);
+  $('tab-filters').addEventListener('click', openDrawer);
+  $('tabbar').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-tab]');
+    if (button) setView(button.dataset.tab);
+  });
   $('sidebar-close').addEventListener('click', () => closeDrawer());
   $('scrim').addEventListener('click', () => closeDrawer());
   $('export-btn').addEventListener('click', exportSettings);
@@ -1823,3 +1868,5 @@ midWidth.addEventListener('change', syncSearchPlaceholder);
 wireEvents();
 loadInitial();
 setInterval(tick, TICK_MS);
+// Tells js/boot-check.js the app is up, so it never replaces the page with its failure message.
+document.documentElement.dataset.app = 'ready';

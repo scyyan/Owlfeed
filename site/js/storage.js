@@ -163,13 +163,14 @@ export function createStorage(backend = defaultBackend()) {
     },
 
     prefs() {
-      const value = load('prefs', DEFAULT_PREFS);
+      const value = load('prefs', null);
       const prefs = isPlainObject(value) ? value : {};
       return {
         view: typeof prefs.view === 'string' ? prefs.view : DEFAULT_PREFS.view,
         hiddenCategories: stringList(prefs.hiddenCategories),
         hiddenSources: stringList(prefs.hiddenSources),
-        density: DENSITIES.includes(prefs.density) ? prefs.density : DEFAULT_PREFS.density,
+        // No stored choice yet: the app picks a default for the screen (compact on phones).
+        density: DENSITIES.includes(prefs.density) ? prefs.density : null,
       };
     },
     setPrefs: (prefs) => save('prefs', prefs),
