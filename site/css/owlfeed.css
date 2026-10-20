@@ -122,6 +122,11 @@ input {
   color: inherit;
 }
 
+input::placeholder {
+  color: var(--muted); /* the browser default grey falls under 4.5:1 on the canvas */
+  opacity: 1;
+}
+
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -573,7 +578,7 @@ kbd {
   min-width: 1.4em;
   padding: 0 5px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--watch) 14%, transparent);
+  background: var(--surface); /* amber on paper: 4.5:1 or better in both themes */
   font-size: 11.5px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -593,23 +598,80 @@ kbd {
 }
 
 /* "+3 as Zelensky*": the upgrade offer, inside the chip after the ×. */
-.chip-upgrade {
-  min-height: 24px;
-  margin-left: 2px;
+.item-summary.is-snippet {
+  color: var(--text-2);
+}
+
+/* "2 terms could catch more · Review": one quiet line under the chips, not an offer per chip. */
+.watch-upgrades {
+  padding: 6px 6px 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.watch-upgrades-line {
+  margin: 0;
+}
+
+.watch-upgrades-list {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.watch-upgrade {
+  min-height: 28px;
   padding: 0 8px;
   border: 1px dashed color-mix(in srgb, var(--watch) 55%, transparent);
-  border-radius: 999px;
+  border-radius: 6px;
   background: transparent;
-  color: inherit;
+  color: var(--watch);
   font: inherit;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: left;
   cursor: pointer;
 }
 
-.chip-upgrade:hover {
+.watch-upgrade:hover {
   border-style: solid;
   background: var(--hover-tint);
+}
+
+.watch-upgrade-extra {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Help glossary: the real glyphs beside their meaning. */
+.glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  vertical-align: middle;
+}
+
+.glyph .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.glyph-read {
+  background: var(--new-soft);
+  color: var(--ok);
+}
+
+.glyph-saved {
+  background: var(--watch-soft);
+  color: var(--saved);
+}
+
+.glyph-saved .icon {
+  fill: currentColor;
 }
 
 /* No hits right now: still listed, just quieter, so the terms with hits lead. */
@@ -844,22 +906,6 @@ kbd {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-}
-
-.chip-new {
-  padding: 4px 10px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--new-soft);
-  color: var(--new);
-  font-size: 12.5px;
-  font-weight: 650;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.chip-new[aria-pressed="true"] {
-  outline: 2px solid var(--new);
 }
 
 /* ── Watch status: the top bar's anchor. Owl eyes + freshness + source health. ── */
@@ -1200,10 +1246,28 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-.briefing-part + .briefing-part::before {
+/* The separator ends its item, so a wrapped line never starts with "·". */
+.briefing-part:not(:last-child)::after {
   content: "·";
   margin: 0 8px;
   color: var(--muted);
+}
+
+/* Stale, folded into the briefing line: Alarm Rust, before the counts it qualifies. */
+.briefing-stale {
+  color: var(--error);
+  font-weight: 650;
+}
+
+.briefing-scope {
+  color: var(--muted);
+}
+
+.filters-widened {
+  flex-basis: 100%;
+  order: 3;
+  color: var(--text-2);
+  font-size: 12.5px;
 }
 
 /* A count that filters: underlined on hover, like the other link buttons. */
@@ -1599,6 +1663,7 @@ kbd {
 }
 
 .item-summary {
+  max-width: 60ch; /* about 80 characters a line, even in the 880px column */
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -1988,11 +2053,6 @@ mark.hl-watch.hl-search {
     display: inline;
   }
 
-  /* Phones: the search keeps the room; the New view is one tap away in the drawer. */
-  .topbar .chip-new {
-    display: none;
-  }
-
   /* Phones have no sidebar on screen: the idle bar says which view this is. */
   .active-filters.is-idle {
     display: flex;
@@ -2103,8 +2163,7 @@ mark.hl-watch.hl-search {
     gap: 2px;
   }
 
-  .chip-filter,
-  .chip-upgrade {
+  .chip-filter {
     min-height: 32px;
   }
 

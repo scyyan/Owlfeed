@@ -154,8 +154,8 @@ def test_new_since_last_visit(page, server):
     open_dashboard(page, server)
     # i01, i02 and i03 were first seen less than 100 minutes ago.
     expect(page.locator(".badge-new")).to_have_count(3)
-    expect(page.locator("#new-chip")).to_have_text("3 new")
-    page.locator("#new-chip").click()
+    expect(page.locator('[data-view="new"] .count')).to_have_text("3")
+    page.locator('[data-view="new"]').click()
     expect(page.locator("article.item")).to_have_count(3)
     page.reload()  # reloading keeps the same baseline within the tab session
     expect(page.locator(".badge-new")).to_have_count(3)
@@ -166,7 +166,7 @@ def test_auto_refresh_adds_new_items(make_page, server):
     page.clock.install(time=NOW)
     open_dashboard(page, server)
     # First visit: the last 24 hours count as new, so the New view starts useful.
-    expect(page.locator("#new-chip")).to_be_visible()
+    expect(page.locator('[data-view="new"] .count')).not_to_have_text("0")
 
     server.write_feed(build_feed(extra_items=[breaking_item()], generated_at=NOW + timedelta(minutes=5)))
     # Just past the 5-minute poll, so the 4-second "added" toast is still showing.
@@ -305,7 +305,7 @@ def test_new_badges_reset_after_a_long_absence(make_page, server):
     expect(page.locator(".badge-new")).to_have_count(3)
     hide_and_show(page, 31 * 60_000)  # a long one starts a new visit: everything was seen
     expect(page.locator(".badge-new")).to_have_count(0)
-    expect(page.locator("#new-chip")).to_be_hidden()
+    expect(page.locator('[data-view="new"] .count')).to_have_text("0")
 
 
 def test_drawer_is_modal_on_phones(make_page, server):
@@ -768,7 +768,12 @@ def test_search_uses_whole_words_like_the_watchlist(page, server):
     open_dashboard(page, server)
     search = page.get_by_role("searchbox")
     search.fill("Examp")
-    expect(page.get_by_text("Nothing matches “Examp”")).to_be_visible()  # only inside longer words
+    # No whole-word match, so the prefix form runs, and says so...
+    expect(page.locator(".filters-widened")).to_contain_text("No whole-word matches for “Examp”, so showing Examp*")
+    expect(page.locator("article.item").first).to_be_visible()
+    # ...and "Search exactly" goes back to whole words: nothing, only inside longer words.
+    page.locator(".filters-widened").get_by_role("button", name="Search exactly").click()
+    expect(page.get_by_text("Nothing matches “Examp”")).to_be_visible()
     search.fill("Examp*")
     expect(page.locator("article.item").first).to_be_visible()
     expect(page.locator("mark.hl-search").first).to_have_text(re.compile(r"^Examp\w+"))
@@ -778,8 +783,7 @@ def test_empty_new_view_names_its_baseline_and_points_to_unread(page, server):
     set_last_visit(page, iso(NOW))  # nothing in the sample feed arrived after this
     open_dashboard(page, server)
     page.locator('[data-view="new"]').click()
-    expect(page.get_by_text("Nothing new since 2:00 PM")).to_be_visible()
-    expect(page.locator("#active-filters")).to_contain_text("New since 2:00 PM")
+    expect(page.get_by_text("Nothing new since your last visit, 2:00 PM")).to_be_visible()
     expect(page.get_by_text(f"{len(ITEMS)} unread items from earlier are still waiting.")).to_be_visible()
     page.get_by_role("button", name="Go to Unread").click()
     expect(page.locator('[data-view="unread"]')).to_have_attribute("aria-current", "true")
@@ -862,6 +866,7 @@ def test_stale_banner_speaks_to_readers_and_can_be_hidden(page, server):
 def test_zero_result_search_offers_the_prefix_version(page, server):
     open_dashboard(page, server)
     page.get_by_role("searchbox").fill("Examp")
+    page.get_by_role("button", name="Search exactly").click()  # opt out of the automatic prefix form
     expect(page.get_by_text("Nothing matches “Examp” as whole words")).to_be_visible()
     expect(page.locator("#mark-all-read")).to_have_text("Nothing to mark")  # not "All read"
     page.get_by_role("button", name="Search Examp*").click()
@@ -914,6 +919,7 @@ def test_keyboard_cursor_shows_in_every_view(page, server):
 def test_suggestion_from_the_keyboard_keeps_focus_in_the_results(page, server):
     open_dashboard(page, server)
     page.get_by_role("searchbox").fill("Examp")
+    page.get_by_role("button", name="Search exactly").click()
     page.get_by_role("button", name="Search Examp*").focus()
     page.keyboard.press("Enter")
     expect(page.get_by_role("searchbox")).to_have_value("Examp*")
@@ -1013,11 +1019,15 @@ def test_a_whole_word_term_offers_its_prefix_form_when_that_catches_more(page, s
     open_dashboard(page, server)
     page.get_by_label("Add a watchlist term").fill("Example")
     page.get_by_label("Add a watchlist term").press("Enter")
+    upgrades = page.locator("#watch-upgrades")
+    expect(upgrades).to_contain_text("1 term could catch more")  # one quiet line, not an offer per chip
+    upgrades.get_by_role("button", name="Review").click()
     offer = page.locator("[data-upgrade-term='Example']")
-    expect(offer).to_have_text(re.compile(r"^\+\d+ as Example\*$"))
+    expect(offer).to_have_text(re.compile(r"^Example → Example\* \+\d+$"))
     offer.click()
     expect(page.locator("[data-watch-term='Example*']")).to_be_focused()
     expect(page.locator("[data-upgrade-term]")).to_have_count(0)
+    expect(upgrades).to_be_hidden()
 
 
 def test_briefing_summary_counts_are_filters(page, server):
@@ -1027,3 +1037,50 @@ def test_briefing_summary_counts_are_filters(page, server):
     summary.get_by_role("button", name=re.compile(r"Cyber$")).click()
     expect(page.get_by_role("checkbox", name="Geopolitics")).not_to_be_checked()
     expect(page.locator('[data-view="unread"]')).to_have_attribute("aria-current", "true")  # still the briefing
+
+
+def test_removing_a_watch_term_can_be_undone_in_place(page, server):
+    open_dashboard(page, server)
+    field = page.get_by_role("textbox", name="Add a watchlist term")
+    for term in ["ExampleVPN", "ransomware", "ExampleOS"]:
+        field.fill(term)
+        field.press("Enter")
+    expect(page.locator("#announcer")).to_contain_text("ExampleOS added to your watchlist")
+    page.get_by_role("button", name="Remove ransomware from watchlist").click()
+    expect(page.locator(".chip-label")).to_have_text(["ExampleVPN", "ExampleOS"])
+    page.locator("#status").get_by_role("button", name="Undo").click()
+    expect(page.locator(".chip-label")).to_have_text(["ExampleVPN", "ransomware", "ExampleOS"])  # back in its place
+
+
+def test_briefing_views_carry_their_name_and_staleness_in_the_summary(page, server):
+    server.write_feed(build_feed(generated_at=NOW - timedelta(hours=3)))
+    open_dashboard(page, server)
+    page.locator('[data-view="unread"]').click()
+    expect(page.locator("#active-filters")).to_be_hidden()  # no view token: the summary names the view
+    expect(page.locator("#stale-banner")).to_be_hidden()
+    expect(page.locator(".briefing-stale")).to_contain_text("Stale: last update")
+    page.locator('[data-view="all"]').click()
+    expect(page.locator("#stale-banner")).to_be_visible()  # other views keep the banner
+
+
+def test_briefing_hits_count_opens_the_hits_in_place(page, server):
+    open_dashboard(page, server)
+    for term in ["Example*", "ransomware", "summit", "port", "flaw", "kit"]:
+        page.get_by_label("Add a watchlist term").fill(term)
+        page.get_by_label("Add a watchlist term").press("Enter")
+    page.locator('[data-view="unread"]').click()
+    hits = page.locator(".briefing").get_by_role("button", name=re.compile(r"watchlist hits$"))
+    total = int(hits.locator("strong").inner_text())
+    assert total > 5
+    hits.click()
+    expect(page.locator('[data-view="unread"]')).to_have_attribute("aria-current", "true")  # still the briefing
+    expect(page.locator(".day-pinned article")).to_have_count(total)
+
+
+def test_a_match_past_the_visible_lines_is_shown_as_a_snippet(page, server):
+    open_dashboard(page, server)
+    page.get_by_role("searchbox").fill("certificates")
+    summary = page.locator("article.item .item-summary").first
+    expect(summary).to_have_class(re.compile(r"\bis-snippet\b"))
+    expect(summary).to_have_text(re.compile(r"^…"))
+    expect(summary.locator("mark.hl-search")).to_have_text("certificates")

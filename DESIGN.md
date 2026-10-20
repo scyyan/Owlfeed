@@ -226,7 +226,7 @@ mean exactly one thing.
 
 ### Tertiary
 - **Fresh Green** (#0f6e33 light; #4ade80 dark), on its soft tint (#dff4e6 / #12311f): new since
-  last visit. It's used for the NEW badge and the "new" filter chip. **Healthy Green** (#16a34a)
+  last visit. It's used for the NEW badge. **Healthy Green** (#16a34a)
   marks a source that refreshed successfully and an item marked read.
 - **Alarm Rust** (#b93d06 light; #fb8b4b dark): something is wrong. It's used for failing-source
   dots and labels, the "updated N hours ago" warning, and the stale-data banner.
@@ -361,7 +361,7 @@ Softly rounded rectangles, sized by role:
 - 6px for small rows and the "only" button
 - 3px for highlighted text
 
-Fully round (999px) shapes mean status or tags: badges, watch chips, the new chip and the
+Fully round (999px) shapes mean status or tags: badges, watch chips and the
 new-items pill. Dots (8px source and health dots, 7px item category dots) are circles. Icons are
 18px line icons with a 2px stroke and round caps and joins, drawn inline as SVG. The brand mark
 is an owl on a 14/64-rounded indigo tile.
@@ -390,11 +390,9 @@ border at rest. Ghost buttons remain only where a control sits inside running te
 - **Focus:** every control gets a 2px Night Sky Blue outline with a 2px offset (`:focus-visible`).
 
 ### Chips
-- **Watch chip:** a pill in Owl's-Eye Amber on its soft tint, 12.5px at 600 weight, with a 20px
+- **Watch chip:** (counts and upgrades: see Watchlist upgrades below) a pill in Owl's-Eye Amber on its soft tint, 12.5px at 600 weight, with a 20px
   circular × button for removal. Re-adding a listed term keeps the typed text and pulses the
   existing chip with a 3px Owl's-Eye Amber ring (an outline under reduced motion).
-- **New filter chip:** a pill in Fresh Green on its soft tint, 12.5px at 650 weight. When pressed
-  it gets a 2px Fresh Green outline.
 - **Badges:** 18px-tall pills at 11.5px and 700 weight. NEW is uppercase Fresh Green, and the
   watchlist badge is Owl's-Eye Amber.
 
@@ -477,25 +475,54 @@ why. The summary and finish line update in place as items are read. NEW badges a
 New view, where every row is new. All items, Saved and Watchlist hits keep strict time order.
 
 **Summary counts are filters.** The briefing summary is a list (screen readers hear each part),
-with "·" separators drawn in CSS. "31 watchlist hits" opens the Watchlist hits view; a category
-count ("158 Cyber") shows that category alone within the briefing. The view's own count is plain.
+with "·" separators drawn in CSS. "31 watchlist hits" opens all the briefing's hits in the pinned
+section and moves there, so the number clicked is the number shown; a category count ("158 Cyber")
+shows that category alone within the briefing. The view's own count is plain. Nothing in the
+summary leaves the briefing.
 
 **Watchlist upgrades.** When a whole-word term's prefix form would catch more ("Zelensky" misses
-"Zelenskyy"), its chip adds a dashed amber offer, "+3 as Zelensky*". One tap replaces the term in
-place and keeps focus on the new chip.
+"Zelenskyy"), one quiet Slate Muted line under the chips says so: "1 term could catch more.
+Review". Review lists each offer as a dashed amber button, "Zelensky → Zelensky* +3"; one tap
+replaces the term in place and keeps focus on the new chip. Chip counts follow the current view
+(in New, a chip counts that briefing's hits), and sit on Paper so amber numbers keep 4.5:1.
+
+**Why a row is here.** When a search (or, in Watchlist hits, a watch term) matches only past the
+two visible summary lines, the summary starts a few words before the match with "…", so the
+highlight is always on screen.
 
 **Density and Mark read icons.** The density toggle draws two rules with arrows closing between
 them (never three or four bars, which read as the menu). At 1000px and below, "Mark N read" keeps
 its count beside the double check ("✓✓ 328"). On phones in compact mode only the star shows: rows
 stay one tap target tall, opening an item marks it read, and "Mark these N read" closes out a list.
 
+**Glossary.** "What the labels mean" defines New, Unread, Just arrived, Read (the ring and check), Saved
+(the star) and a watchlist hit (the amber row and eye badge), each drawn with its real glyph.
+
 **Help on touch screens.** The drawer's "What the labels mean" opens the help dialog, which on
 touch drops the keyboard shortcuts and leads with the label glossary and search rules.
 
+**Briefing chrome.** New and Unread carry no view token and no idle bar: the summary line names
+them. While stale, the banner gives way in these views to the summary's first item, "Stale: last
+update 9:58 PM, 1 day ago" in Alarm Rust. The summary's
+"·" separators end their item, so a wrapped line never starts with one.
+
+**One name for new.** NEW is always "since your last visit" (with its time), or on a first visit
+"in the 24 hours before the last update", measured from the build, so stale rows can still say
+"2d ago". The summary line, empty state and help glossary use exactly these words.
+
+**Searches widen once.** When a whole-word search finds nothing here and its prefix form does,
+the prefix form runs: the search token reads "Search: ransom*" and a line explains "No whole-word
+matches for “ransom”, so showing ransom*" with "Search exactly" to go back to strict.
+
+**Watchlist edits speak and undo.** Adding a term announces its hit count; removing one shows a
+toast with Undo (and Ctrl/⌘ Z), which puts the term back in its old place.
+
+**Measure.** Summaries cap at 60ch (about 80 characters). Placeholders use Slate Muted, not the browser's grey.
+
 **Search variants.** When the prefix form of a search finds more ("Zelensky" → "Zelensky*"), the
 filter bar offers it: "+3 more as Zelensky*". In briefing views the filter bar drops its own count
-(the summary line carries it), and the "N new" chip counts with the search. Phones hide the chip so
-the search keeps its width.
+(the summary line carries it). There is no "N new" chip: the New view in the sidebar carries the
+count, so the top bar keeps its width for the search.
 
 **Hidden categories** show what showing them would add, muted and in brackets ("(170)"), never a
 bare 0. Day headers name the weekday once ("FRIDAY Oct 16"; Today and Yesterday keep "Sat, Oct 17").

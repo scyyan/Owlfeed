@@ -92,7 +92,28 @@ function actionButton(kind, pressed) {
   return button;
 }
 
-/** ctx: { now, matcher, tokens, isRead(id), isSaved(id), isNew(item) } */
+// Roughly what two clamped summary lines show; a first match past this would be cut off.
+const VISIBLE_CHARS = 110;
+
+/**
+ * Where to start the summary so the reason a row is here stays visible: the search match (or, in
+ * the Watchlist hits view, the watch match) when the headline has none and the summary's first one
+ * falls past the visible lines. Starts a few words before it, at a word boundary.
+ */
+function matchWindow(item, ctx) {
+  const none = { start: 0 };
+  const searching = ctx.tokens?.length > 0;
+  const watching = ctx.view === 'watchlist' && ctx.matcher;
+  if (!searching && !watching) return none;
+  const ranges = (text) => (searching ? queryRanges(text, ctx.tokens) : ctx.matcher.ranges(text));
+  if (ranges(item.title).length) return none;
+  const first = ranges(item.summary)[0];
+  if (!first || first[0] < VISIBLE_CHARS) return none;
+  const space = item.summary.lastIndexOf(' ', first[0] - 40);
+  return { start: space > 0 ? space + 1 : 0 };
+}
+
+/** ctx: { now, view, matcher, tokens, isRead(id), isSaved(id), isNew(item) } */
 export function itemElement(item, ctx) {
   const article = el('article', 'item');
   article.dataset.id = item.id;
@@ -145,7 +166,13 @@ export function itemElement(item, ctx) {
   body.append(heading, meta);
   if (item.summary) {
     const summary = el('p', 'item-summary');
-    appendHighlighted(summary, item.summary, ctx);
+    const { start } = matchWindow(item, ctx);
+    if (start > 0) {
+      // The match that put this row here sits past the two visible lines: start the summary near it.
+      summary.classList.add('is-snippet');
+      summary.append('…');
+    }
+    appendHighlighted(summary, item.summary.slice(start), ctx);
     body.append(summary);
   } else {
     body.append(el('p', 'item-summary is-empty', 'No summary provided by the source.'));
@@ -387,7 +414,38 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
  * Watchlist chips. Each is a filter: pressing it shows that term's hits alone (pressed again, all
  * hits), with its hit count under the current category and source filters. The × removes the term.
  */
-export function renderWatchTerms(list, terms, counts = new Map(), active = null, upgrades = new Map()) {
+/**
+ * Terms whose prefix form would catch more, gathered into one quiet line under the chips
+ * ("2 terms could catch more · Review"); Review lists each offer: "Zelensky → Zelensky* (+3)".
+ */
+export function renderWatchUpgrades(box, upgrades, open) {
+  box.replaceChildren();
+  box.hidden = upgrades.size === 0;
+  if (!upgrades.size) return;
+  const line = el('p', 'watch-upgrades-line', `${upgrades.size === 1 ? '1 term' : `${upgrades.size} terms`} could catch more. `);
+  const toggle = el('button', 'link-btn', open ? 'Hide' : 'Review');
+  toggle.type = 'button';
+  toggle.dataset.upgradesToggle = '';
+  toggle.setAttribute('aria-expanded', String(open));
+  line.append(toggle);
+  box.append(line);
+  if (!open) return;
+  const list = el('ul', 'watch-upgrades-list');
+  for (const [term, { variant, extra }] of upgrades) {
+    const li = el('li');
+    const offer = el('button', 'watch-upgrade');
+    offer.type = 'button';
+    offer.dataset.upgradeTerm = term;
+    offer.dataset.variant = variant;
+    offer.setAttribute('aria-label', `Change ${term} to ${variant} to catch ${extra} more`);
+    offer.append(`${term} → ${variant} `, el('span', 'watch-upgrade-extra', `+${extra}`));
+    li.append(offer);
+    list.append(li);
+  }
+  box.append(list, el('p', 'hint', 'A trailing * also matches longer words, such as other spellings.'));
+}
+
+export function renderWatchTerms(list, terms, counts = new Map(), active = null) {
   list.replaceChildren(
     ...terms.map((term) => {
       const li = el('li', 'chip');
@@ -408,17 +466,6 @@ export function renderWatchTerms(list, terms, counts = new Map(), active = null,
       remove.setAttribute('aria-label', `Remove ${term} from watchlist`);
       remove.append(icon('close'));
       li.append(filter, remove);
-      const upgrade = upgrades.get(term);
-      if (upgrade) {
-        // "+3 as Zelensky*": the prefix form catches spellings the whole word misses.
-        const offer = el('button', 'chip-upgrade', `+${upgrade.extra} as ${upgrade.variant}`);
-        offer.type = 'button';
-        offer.dataset.upgradeTerm = term;
-        offer.dataset.variant = upgrade.variant;
-        offer.setAttribute('aria-label', `Change ${term} to ${upgrade.variant} to catch ${upgrade.extra} more`);
-        offer.title = `${upgrade.variant} also matches longer words, such as other spellings`;
-        li.append(offer);
-      }
       return li;
     }),
   );

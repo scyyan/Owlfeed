@@ -41,6 +41,9 @@ const state = {
   firstVisit: false, // no earlier visit: the baseline is the last 24 hours instead
   watchTerm: null, // in the Watchlist hits view: show only this term's hits
   showAllHits: false, // briefing views: all watchlist hits pinned, not just the newest few
+  widened: null, // { from: 'ransom', to: 'ransom*' } when a whole-word search found nothing and its prefix form did
+  exactQuery: null, // a query the reader asked to keep whole-word, even with no results
+  upgradesOpen: false, // the watchlist's "could catch more" list is expanded
   seenGeneratedAt: null, // generated_at of the newest build shown while the page was visible
   hiddenAt: null,
   pending: null,
@@ -107,11 +110,15 @@ function rememberVisit() {
   writeSession();
 }
 
-/** One phrase for what NEW means right now, used by the view, the filter bar and the empty state. */
-function newSinceLabel(now = Date.now()) {
-  if (state.firstVisit) return 'New in the last 24 hours';
+/**
+ * What NEW is measured from, in one phrase used by the summary line, the empty state and the
+ * sidebar tooltip: "since your last visit, 1:58 PM", or on a first visit "in the 24 hours before
+ * the last update" (measured from the build, so a stale feed's rows can still say "2d ago").
+ */
+function newScope(now = Date.now()) {
+  if (state.firstVisit) return 'in the 24 hours before the last update';
   const since = baselineLabel(now);
-  return since ? `New since ${since}` : 'New since last visit';
+  return since ? `since your last visit, ${since}` : 'since your last visit';
 }
 
 // A first visit has no seen-before build, and a fresh fetch "first sees" a whole week at once, so
@@ -332,7 +339,7 @@ function visibleItems() {
 }
 
 function renderContext() {
-  return { now: Date.now(), matcher: state.matcher, tokens: state.tokens, isRead, isSaved, isNew };
+  return { now: Date.now(), view: state.prefs.view, matcher: state.matcher, tokens: state.tokens, isRead, isSaved, isNew };
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────────
@@ -443,7 +450,16 @@ function briefingSummary(list, pinned) {
     li.append(node);
     return li;
   };
-  const parts = [part(list.length, state.prefs.view === 'new' ? 'new' : 'unread')];
+  const parts = [];
+  const fresh = freshness();
+  if (fresh?.stale) {
+    // The stale banner folds in here for briefings: one line, before the counts it qualifies.
+    const li = ui.el('li', 'briefing-part briefing-stale', `Stale: last update ${clockTime(fresh.generated)}, ${updatedLabel(fresh.generated)}`);
+    parts.push(li);
+  }
+  const first = part(list.length, state.prefs.view === 'new' ? 'new' : 'unread');
+  if (state.prefs.view === 'new') first.firstChild.append(ui.el('span', 'briefing-scope', ` ${newScope()}`));
+  parts.push(first);
   if (state.terms.length) {
     const label = pinned.length === 1 ? 'watchlist hit' : 'watchlist hits';
     parts.push(part(pinned.length, label, pinned.length ? { feedAction: 'briefing-hits' } : null));
@@ -460,11 +476,10 @@ function briefingSummary(list, pinned) {
 
 /**
  * Whole-word terms can miss spellings ("Zelensky" vs "Zelenskyy"). For each term whose prefix
- * form would catch more, the chip offers the upgrade: { variant, extra }.
+ * form would catch more, the watchlist offers the upgrade: { variant, extra }.
  */
-function termUpgrades(termCounts) {
+function termUpgrades(termCounts, pool) {
   const upgrades = new Map();
-  const pool = filterItems(state.items, filterContext('all', state.tokens, { watchTerm: null }));
   for (const term of state.terms) {
     if (term.endsWith('*') || term.replace(/\s+/g, '').length < 3) continue;
     const variant = `${term}*`;
@@ -587,7 +602,7 @@ function emptyStateFor() {
           goUnread,
         );
       }
-      const title = state.firstVisit ? 'Nothing new in the last 24 hours' : since ? `Nothing new since ${since}` : 'Nothing new since your last visit';
+      const title = `Nothing new ${newScope()}`;
       return unread
         ? ui.emptyState(title, waiting.trim(), goUnread)
         : ui.emptyState(title, 'New items appear here as the feed refreshes.');
@@ -641,8 +656,8 @@ const VIEW_LABELS = { all: 'All items', new: 'New since last visit', unread: 'Un
  */
 function activeFilterParts() {
   const parts = [];
-  if (state.prefs.view === 'new') parts.push({ id: 'view', label: newSinceLabel() });
-  else if (state.prefs.view !== 'all') parts.push({ id: 'view', label: VIEW_LABELS[state.prefs.view] });
+  // Briefing views name themselves in their summary line (and the sidebar), so no view token there.
+  if (state.prefs.view !== 'all' && !BRIEFING_VIEWS.has(state.prefs.view)) parts.push({ id: 'view', label: VIEW_LABELS[state.prefs.view] });
   if (state.prefs.view === 'watchlist' && state.watchTerm) parts.push({ id: 'term', label: `Term: ${state.watchTerm}` });
   const hiddenCats = state.categories.filter((c) => state.prefs.hiddenCategories.includes(c));
   if (hiddenCats.length) {
@@ -661,7 +676,8 @@ function activeFilterParts() {
     });
   }
   const query = state.query.trim();
-  if (query) parts.push({ id: 'search', label: `Search: ${query}` }); // as typed, so quoted phrases keep one set of quotes
+  // As typed, so quoted phrases keep one set of quotes; a widened search shows what it really ran.
+  if (query) parts.push({ id: 'search', label: `Search: ${state.widened ? state.widened.to : query}` });
   return parts;
 }
 
@@ -670,8 +686,13 @@ function renderActiveFilters(count) {
   const parts = activeFilterParts();
   // Nothing narrowing the view: phones still show where you are ("All items · 328"); wider screens
   // have the sidebar for that, so CSS hides this idle form there.
-  bar.hidden = false;
+  // In a briefing the summary line already says where you are: no idle bar there.
+  bar.hidden = !parts.length && BRIEFING_VIEWS.has(state.prefs.view) && count > 0;
   bar.classList.toggle('is-idle', parts.length === 0);
+  if (bar.hidden) {
+    bar.replaceChildren();
+    return;
+  }
   if (!parts.length) {
     bar.replaceChildren(ui.el('span', 'filters-count', plural(count, 'item')), ui.el('span', 'filters-view', VIEW_LABELS[state.prefs.view]));
     return;
@@ -696,6 +717,15 @@ function renderActiveFilters(count) {
     clear.type = 'button';
     clear.dataset.emptyAction = 'reset';
     nodes.push(clear);
+  }
+  if (state.widened) {
+    // Said once, beside the search token: why these results, and the way back to strict.
+    const note = ui.el('span', 'filters-widened', `No whole-word matches for “${state.widened.from}”, so showing ${state.widened.to}. `);
+    const exact = ui.el('button', 'link-btn', 'Search exactly');
+    exact.type = 'button';
+    exact.dataset.emptyAction = 'exact';
+    note.append(exact);
+    nodes.push(note);
   }
   // Whole words can miss variants ("Zelensky" vs "Zelenskyy"): when the prefix form finds more,
   // say how many more, one click away. Otherwise, for several bare words, the phrase tip.
@@ -729,6 +759,7 @@ function clearFilter(id, event) {
   else if (id === 'search') {
     state.query = '';
     state.tokens = [];
+    state.widened = null;
     $('search').value = '';
   }
   filtersChanged();
@@ -931,13 +962,15 @@ function renderSidebar() {
     openGroups,
   });
   $('sources-reset').hidden = !state.prefs.hiddenSources.length;
-  // Each term's hits under the current category and source filters: the chip filters to them.
-  const hits = filterItems(state.items, filterContext('watchlist', state.tokens, { watchTerm: null }));
-  const termCounts = new Map(state.terms.map((term) => [term, hits.filter((item) => item.watch.includes(term)).length]));
+  // Each term's hits in the current view (New, Unread...), filters and search, so a chip agrees with
+  // the briefing summary beside it. In the Watchlist hits view that is every hit.
+  const view = state.prefs.view === 'watchlist' ? 'all' : state.prefs.view;
+  const pool = filterItems(itemsForView(view, saved), filterContext(view, state.tokens, { watchTerm: null }));
+  const termCounts = new Map(state.terms.map((term) => [term, pool.filter((item) => item.watch.includes(term)).length]));
   const activeTerm = state.prefs.view === 'watchlist' ? state.watchTerm : null;
-  ui.renderWatchTerms($('watch-terms'), state.terms, termCounts, activeTerm, termUpgrades(termCounts));
+  ui.renderWatchTerms($('watch-terms'), state.terms, termCounts, activeTerm);
+  ui.renderWatchUpgrades($('watch-upgrades'), termUpgrades(termCounts, pool), state.upgradesOpen);
   updateMarkAll();
-  updateNewChip();
   restoreFocus(focused);
 }
 
@@ -947,7 +980,8 @@ function renderHeader() {
   if (fresh) {
     // Written for readers: what they can rely on. The owner's fix lives in the watch report.
     const latest = (state.pending ?? state.data)?.generated_at;
-    $('stale-banner').hidden = !fresh.stale || staleHiddenFor() === latest;
+    // Briefing views carry the stale state in their summary line instead of a banner.
+    $('stale-banner').hidden = !fresh.stale || staleHiddenFor() === latest || BRIEFING_VIEWS.has(state.prefs.view);
     const message = fresh.stale
       ? `This feed was last ${fresh.label.toLowerCase()} (${clockTime(fresh.generated)}). Newer reporting may be missing.`
       : '';
@@ -956,16 +990,6 @@ function renderHeader() {
     // Phones: one line. The chip already says Stale; this says how old and what it means.
     $('stale-short').textContent = fresh.stale ? `Last update ${updatedLabel(fresh.generated)}. Newer reports may be missing.` : '';
   }
-  updateNewChip();
-}
-
-/** The "N new" chip counts what the New view would show now, search included. */
-function updateNewChip() {
-  const newCount = state.data ? filterItems(state.items, filterContext('new', state.tokens, { watchTerm: null })).length : 0;
-  const chip = $('new-chip');
-  chip.hidden = newCount === 0;
-  chip.textContent = `${newCount} new`;
-  chip.setAttribute('aria-pressed', String(state.prefs.view === 'new'));
 }
 
 // Keep keyboard focus on the same sidebar control when the sidebar is rebuilt.
@@ -1021,6 +1045,7 @@ function resetFilters(event) {
   state.watchTerm = null;
   state.query = '';
   state.tokens = [];
+  state.widened = null;
   $('search').value = '';
   filtersChanged();
   // The Clear button that had focus is gone. From the keyboard, continue in the search box; after a
@@ -1313,11 +1338,30 @@ function changeWatchlist(change) {
   if (state.prefs.view === 'watchlist') scrollToFeedTop();
 }
 
+/**
+ * Set the search. Whole words first; when that finds nothing here and the prefix form does
+ * ("ransom" → "ransom*"), run the prefix form and say so, unless the reader asked for exact.
+ */
+function setQuery(query) {
+  state.query = query;
+  state.tokens = parseQuery(query);
+  state.widened = null;
+  const trimmed = query.trim();
+  if (!state.tokens.length || trimmed === state.exactQuery || visibleItems().length) return;
+  const suggestion = prefixSuggestion(trimmed);
+  if (!suggestion) return;
+  const tokens = parseQuery(suggestion);
+  if (!filterItems(itemsForView(state.prefs.view), filterContext(state.prefs.view, tokens)).length) return;
+  state.tokens = tokens;
+  state.widened = { from: trimmed, to: suggestion };
+}
+
 /** Search the prefix form of the query ("Zelensky*"), from an empty state or the filter bar hint. */
 function applySuggestion() {
   $('search').value = state.suggestion;
   state.query = state.suggestion;
   state.tokens = parseQuery(state.query);
+  state.widened = null;
   renderSidebar(); // counts follow the search
   renderFeed();
   scrollToFeedTop();
@@ -1330,7 +1374,6 @@ function wireEvents() {
     const button = event.target.closest('[data-view]');
     if (button) setView(button.dataset.view);
   });
-  $('new-chip').addEventListener('click', () => setView(state.prefs.view === 'new' ? 'all' : 'new'));
 
   $('category-list').addEventListener('change', (event) => {
     const category = event.target.dataset.category;
@@ -1381,12 +1424,12 @@ function wireEvents() {
   $('search').addEventListener('input', (event) => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
-      state.query = event.target.value;
-      state.tokens = parseQuery(state.query);
+      setQuery(event.target.value);
       renderSidebar(); // counts follow the search
       renderFeed();
       scrollToFeedTop();
-      if (state.tokens.length) speak(`${plural(visibleItems().length, 'item')} match`);
+      if (state.widened) speak(`No whole-word matches. Showing ${plural(visibleItems().length, 'item')} for ${state.widened.to}`);
+      else if (state.tokens.length) speak(`${plural(visibleItems().length, 'item')} match`);
     }, 150);
   });
 
@@ -1409,6 +1452,26 @@ function wireEvents() {
     }
     input.value = '';
     changeWatchlist((terms) => addTerm(terms, term).terms);
+    const added = normalizeTerm(term);
+    const hits = state.items.filter((item) => item.watch.includes(added)).length;
+    speak(`${added} added to your watchlist: ${plural(hits, 'hit')}`);
+  });
+
+  $('watch-upgrades').addEventListener('click', (event) => {
+    if (event.target.closest('[data-upgrades-toggle]') != null) {
+      state.upgradesOpen = !state.upgradesOpen;
+      renderSidebar();
+      $('watch-upgrades').querySelector('[data-upgrades-toggle]')?.focus();
+      return;
+    }
+    const upgrade = event.target.closest('[data-upgrade-term]');
+    if (!upgrade) return;
+    // Replace the term with its prefix form, in place, and keep focus on the new chip.
+    const { upgradeTerm: from, variant } = upgrade.dataset;
+    if (state.watchTerm === from) state.watchTerm = variant;
+    changeWatchlist((terms) => terms.map((t) => (t === from ? variant : t)));
+    $('watch-terms').querySelector(`[data-watch-term="${CSS.escape(variant)}"]`)?.focus();
+    speak(`${from} is now ${variant}`);
   });
 
   $('watch-terms').addEventListener('click', (event) => {
@@ -1419,21 +1482,24 @@ function wireEvents() {
       setView('watchlist', { watchTerm: active ? null : filterTerm });
       return;
     }
-    const upgrade = event.target.closest('[data-upgrade-term]');
-    if (upgrade) {
-      // Replace the term with its prefix form, in place, and keep focus on the new chip.
-      const { upgradeTerm: from, variant } = upgrade.dataset;
-      if (state.watchTerm === from) state.watchTerm = variant;
-      changeWatchlist((terms) => terms.map((t) => (t === from ? variant : t)));
-      $('watch-terms').querySelector(`[data-watch-term="${CSS.escape(variant)}"]`)?.focus();
-      speak(`${from} is now ${variant}`);
-      return;
-    }
     const term = event.target.closest('[data-remove-term]')?.dataset.removeTerm;
     if (term == null) return;
     if (state.watchTerm === term) state.watchTerm = null;
+    const index = state.terms.indexOf(term);
     changeWatchlist((terms) => removeTerm(terms, term));
     $('watch-input').focus(); // the chip (and its button) no longer exists
+    announce(`Removed ${term} from your watchlist`, {
+      label: 'Undo',
+      run() {
+        changeWatchlist((terms) => {
+          if (terms.some((t) => t.toLowerCase() === term.toLowerCase())) return terms;
+          const next = [...terms];
+          next.splice(Math.min(index, next.length), 0, term); // back in its old place
+          return next;
+        });
+        announce(`${term} is back on your watchlist`);
+      },
+    });
   });
 
   const feed = $('feed');
@@ -1444,8 +1510,13 @@ function wireEvents() {
       return;
     }
     if (feedAction === 'briefing-hits') {
-      setView('watchlist');
-      focusFirstItem();
+      // Stay in the briefing: open the pinned hits in full and go to them.
+      state.showAllHits = true;
+      renderFeed();
+      const pinned = $('feed').querySelector('.day-pinned');
+      pinned?.scrollIntoView({ block: 'start' });
+      pinned?.querySelector('.item-title a')?.focus({ preventScroll: true });
+      speak(`All ${plural(pinned?.querySelectorAll('article').length ?? 0, 'watchlist hit')} in this briefing`);
       return;
     }
     if (feedAction === 'briefing-category') {
@@ -1518,6 +1589,14 @@ function wireEvents() {
     const emptyAction = event.target.closest('[data-empty-action]')?.dataset.emptyAction;
     if (token) clearFilter(token, event);
     else if (emptyAction === 'suggest' && state.suggestion) applySuggestion();
+    else if (emptyAction === 'exact' && state.widened) {
+      state.exactQuery = state.widened.from;
+      setQuery(state.query);
+      renderSidebar();
+      renderFeed();
+      $('search').focus({ preventScroll: true });
+      speak(`Exact whole words: ${plural(visibleItems().length, 'item')}`);
+    }
     else if (emptyAction) resetFilters(event);
   });
   for (const button of document.querySelectorAll('[data-mark-all]')) {
@@ -1596,6 +1675,7 @@ function wireEvents() {
         $('search').value = '';
         state.query = '';
         state.tokens = [];
+        state.widened = null;
         renderSidebar(); // counts follow the search
         renderFeed();
         scrollToFeedTop();
