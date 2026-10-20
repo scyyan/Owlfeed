@@ -63,12 +63,15 @@ function startOfDay(ms) {
   return d.getTime();
 }
 
-/** Day header text: { title: "Today" | "Yesterday" | "Monday", detail: "Wed, Oct 15" }. */
+/**
+ * Day header text: { title: "Today" | "Yesterday" | "Monday", detail: "Wed, Oct 15" }. When the
+ * title already names the weekday, the detail leaves it out ("Monday · Oct 13", not "Monday Mon, Oct 13").
+ */
 export function dayLabel(ms, now = Date.now(), locale) {
   const days = Math.round((startOfDay(now) - startOfDay(ms)) / DAY);
   const sameYear = new Date(ms).getFullYear() === new Date(now).getFullYear();
   const detail = new Date(ms).toLocaleDateString(locale, {
-    weekday: 'short',
+    ...(days <= 1 ? { weekday: 'short' } : {}),
     month: 'short',
     day: 'numeric',
     ...(sameYear ? {} : { year: 'numeric' }),

@@ -17,6 +17,7 @@
 </head>
 <body>
   <a class="skip-link" id="skip-link" href="#feed">Skip to timeline</a>
+  <a class="skip-link" id="skip-search" href="#search">Skip to search</a>
   <div class="app">
     <aside class="sidebar" id="sidebar" aria-label="Views and filters">
       <div class="brand">
@@ -35,11 +36,6 @@
           <li><button class="view-btn" type="button" data-view="saved"><span>Saved</span><span class="count"></span></button></li>
           <li><button class="view-btn" type="button" data-view="watchlist"><span>Watchlist hits</span><span class="count"></span></button></li>
         </ul>
-        <!-- Phones: "mark all read" lives here, away from the search box, instead of in the top bar. -->
-        <button class="btn mark-all mark-all-drawer" id="mark-all-read-drawer" type="button" data-mark-all>
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12.5l4 4L15 8.5M10 16.5l1 1L21 7.5"/></svg>
-          <span class="btn-label">Mark all read</span>
-        </button>
       </nav>
 
       <section class="side-section" aria-labelledby="categories-heading">
@@ -65,12 +61,22 @@
         <div id="source-list"></div>
       </section>
 
+      <!-- Phones: "mark all read" lives here, after the filters that set its scope, not in the top bar. -->
+      <div class="side-section mark-all-section">
+        <button class="btn mark-all mark-all-drawer" id="mark-all-read-drawer" type="button" data-mark-all>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12.5l4 4L15 8.5M10 16.5l1 1L21 7.5"/></svg>
+          <span class="btn-label">Mark all read</span>
+        </button>
+      </div>
+
       <footer class="side-footer">
         <div class="side-actions">
           <button class="link-btn" id="export-btn" type="button">Back up settings</button>
           <button class="link-btn" id="import-btn" type="button">Restore</button>
           <button class="link-btn" id="help-btn" type="button" aria-haspopup="dialog">Shortcuts</button>
+          <button class="link-btn labels-link" id="labels-btn" type="button" aria-haspopup="dialog">What the labels mean</button>
           <button class="link-btn theme-link" id="theme-btn-drawer" type="button" data-theme-toggle>Dark mode</button>
+          <button class="link-btn density-link" id="density-btn-drawer" type="button" aria-pressed="false" data-density-toggle>Compact rows</button>
           <input id="import-input" type="file" accept="application/json,.json" hidden tabindex="-1">
         </div>
         <p class="hint">Watchlist, read and saved items are stored only in this browser. Back them up to move them to another device.</p>
@@ -105,12 +111,15 @@
         </div>
         <div class="search">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zm5-2l4 4"/></svg>
-          <input id="search" type="search" placeholder="Search headlines and summaries  ( / )" aria-label="Search headlines and summaries" autocomplete="off">
+          <input id="search" type="search" placeholder="Search headlines and summaries (press /)" aria-label="Search headlines and summaries" autocomplete="off">
         </div>
         <button class="chip-new" id="new-chip" type="button" aria-pressed="false" hidden></button>
         <button class="btn mark-all" id="mark-all-read" type="button" data-mark-all>
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12.5l4 4L15 8.5M10 16.5l1 1L21 7.5"/></svg>
           <span class="btn-label">Mark all read</span>
+        </button>
+        <button class="icon-btn density-btn" id="density-btn" type="button" aria-pressed="false" aria-label="Compact rows" title="Compact rows: headlines only (d)" data-density-toggle>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16M4 20h16M12 6.5v4M9.5 8.5l2.5 2.5 2.5-2.5M12 17.5v-4M9.5 15.5l2.5-2.5 2.5 2.5"/></svg>
         </button>
         <button class="icon-btn" id="theme-btn" type="button" aria-label="Switch theme" data-theme-toggle>
           <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
@@ -121,6 +130,7 @@
       <div class="content">
         <div class="stale-banner" id="stale-banner" hidden>
           <p class="stale-text" id="stale-text" role="status"></p>
+          <p class="stale-short" id="stale-short" aria-hidden="true"></p>
           <button class="link-btn stale-dismiss" id="stale-dismiss" type="button">Hide for now</button>
         </div>
         <div class="active-filters" id="active-filters" hidden></div>
@@ -134,22 +144,30 @@
   </div>
   <dialog class="help" id="help" aria-labelledby="help-title">
     <div class="help-head">
-      <h2 class="help-title" id="help-title">Keyboard shortcuts</h2>
+      <!-- Touch screens have no keyboard: there the dialog opens on the labels and search rules. -->
+      <h2 class="help-title" id="help-title"><span class="title-keys">Keyboard shortcuts</span><span class="title-touch">What the labels mean</span></h2>
       <button class="icon-btn" id="help-close" type="button" aria-label="Close">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </div>
-    <dl class="keys">
+    <dl class="keys keys-shortcuts">
       <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next or previous item</dd>
       <dt><kbd>o</kbd></dt><dd>Open the item in a new tab (marks it read)</dd>
       <dt><kbd>s</kbd></dt><dd>Save or unsave the item</dd>
       <dt><kbd>m</kbd></dt><dd>Mark the item read or unread</dd>
       <dt><kbd>1</kbd>–<kbd>5</kbd></dt><dd>All, New, Unread, Saved, Watchlist hits</dd>
-      <dt><kbd>n</kbd></dt><dd>Show new items waiting above</dd>
+      <dt><kbd>n</kbd></dt><dd>Show items that just arrived</dd>
+      <dt><kbd>d</kbd></dt><dd>Switch between comfortable and compact rows</dd>
       <dt><kbd>/</kbd></dt><dd>Search</dd>
       <dt><kbd id="undo-mod">Ctrl</kbd> <kbd>Z</kbd></dt><dd>Undo “mark all read”</dd>
       <dt><kbd>Esc</kbd></dt><dd>Clear the search, close panels</dd>
       <dt><kbd>?</kbd></dt><dd>Show this list</dd>
+    </dl>
+    <h3 class="help-subtitle help-labels-heading">What the labels mean</h3>
+    <dl class="keys terms">
+      <dt><span class="badge term-new">New</span></dt><dd>Arrived since your last visit. On your first visit: the last 24 hours. The <em>New since last visit</em> view lists exactly these.</dd>
+      <dt>Unread</dt><dd>Not opened or marked read yet, however old.</dd>
+      <dt>Just arrived</dt><dd>Landed while this page was open. The blue pill above the timeline shows them<span class="keys-only"> (or press <kbd>n</kbd>)</span>.</dd>
     </dl>
     <h3 class="help-subtitle">Searching</h3>
     <p class="help-text">Every word must appear, as a whole word, in the headline, summary or source name: <kbd>APT2</kbd> won’t find APT28. End a word with * to catch longer ones (<strong>ransom*</strong> finds ransomware), and put a phrase in "quotes" to keep its words together. Watchlist terms follow the same rule. Accents and capitals don’t matter.</p>

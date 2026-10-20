@@ -74,7 +74,7 @@ test('prefs fall back to defaults when corrupted', () => {
   backend.setItem('owlfeed:v1:prefs', '{"view": 42, "hiddenSources": "nope"}');
   backend.setItem('owlfeed:v1:watchlist', 'not json');
   const store = createStorage(backend);
-  assert.deepEqual(store.prefs(), { view: 'all', hiddenCategories: [], hiddenSources: [] });
+  assert.deepEqual(store.prefs(), { view: 'all', hiddenCategories: [], hiddenSources: [], density: 'comfortable' });
   assert.deepEqual(store.watchlist(), []);
 });
 

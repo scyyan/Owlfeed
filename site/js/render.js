@@ -127,7 +127,13 @@ export function itemElement(item, ctx) {
     : fullTime(item.publishedMs);
   const age = el('span', 'item-age', relativeTime(item.publishedMs, ctx.now));
   age.dataset.ms = String(item.publishedMs);
-  meta.append(source, separator(), time, separator(), age);
+  // Each separator ends the part before it, so a wrapped line never starts with "·".
+  const part = (...nodes) => {
+    const span = el('span', 'meta-part');
+    span.append(...nodes);
+    return span;
+  };
+  meta.append(part(source, separator()), part(time, separator()), age);
   if (isNew) meta.append(el('span', 'badge badge-new', 'New'));
   for (const term of item.watch) {
     const badge = el('span', 'badge badge-watch');
@@ -161,6 +167,7 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
   let index = 0;
   let lastDay = null;
   let currentList = null;
+  let endNote = null;
 
   const observer = new IntersectionObserver(
     (records) => {
@@ -175,24 +182,33 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
     if (index < entries.length) observer.observe(sentinel);
   }
 
+  function section(title, detail, className = 'day') {
+    const node = el('section', className);
+    const header = el('h2', 'day-header');
+    header.append(el('span', 'day-title', title), el('span', 'day-detail', detail));
+    currentList = el('div', 'day-items');
+    node.append(header, currentList);
+    return node;
+  }
+
   function renderMore() {
-    if (!ctx || index >= entries.length) return;
+    if (!ctx) return;
     const end = Math.min(entries.length, index + pageSize);
     const fragment = document.createDocumentFragment();
     for (; index < end; index += 1) {
       const item = entries[index];
       const key = dayKey(item.publishedMs);
       if (key !== lastDay) {
-        const section = el('section', 'day');
         const label = dayLabel(item.publishedMs, ctx.now);
-        const header = el('h2', 'day-header');
-        header.append(el('span', 'day-title', label.title), el('span', 'day-detail', label.detail));
-        currentList = el('div', 'day-items');
-        section.append(header, currentList);
-        fragment.append(section);
+        fragment.append(section(label.title, label.detail));
         lastDay = key;
       }
       currentList.append(itemElement(item, ctx));
+    }
+    // The finish line, once the last page is on screen.
+    if (index >= entries.length && endNote) {
+      fragment.append(endNote);
+      endNote = null;
     }
     container.append(fragment);
     sentinel.hidden = index >= entries.length;
@@ -200,13 +216,27 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
   }
 
   return {
-    render(list, context) {
+    /**
+     * options.pinned: items shown first under their own header (watchlist hits in a briefing),
+     * with pinnedDetail beside the header and pinnedFooter (a Show all toggle) after them;
+     * options.lead: a node above everything (the briefing summary); options.end: a node after the
+     * last item (the caught-up marker).
+     */
+    render(list, context, { pinned = [], pinnedDetail = '', pinnedFooter = null, lead = null, end = null } = {}) {
       entries = list;
       ctx = context;
       index = 0;
       lastDay = null;
       currentList = null;
+      endNote = end;
       container.replaceChildren();
+      if (lead) container.append(lead);
+      if (pinned.length) {
+        const hits = section('Watchlist hits', pinnedDetail, 'day day-pinned');
+        for (const item of pinned) currentList.append(itemElement(item, ctx));
+        if (pinnedFooter) hits.append(pinnedFooter);
+        container.append(hits);
+      }
       renderMore();
     },
     get size() {
@@ -256,7 +286,7 @@ function checkRow({ attr, value, checked, label, count, dotClass, dotTitle, dotT
  * shown, mixed (indeterminate) when only some are, empty when none are or the category is hidden.
  * The count is what that category shows now. sourceState: Map(category -> { shown, total }).
  */
-export function renderCategories(list, categories, hidden, counts, sourceState = new Map()) {
+export function renderCategories(list, categories, hidden, counts, sourceState = new Map(), allCounts = counts) {
   list.replaceChildren(
     ...categories.map((category) => {
       const li = el('li');
@@ -267,10 +297,18 @@ export function renderCategories(list, categories, hidden, counts, sourceState =
         value: category,
         checked: visible && shown === total,
         label: category,
-        count: visible ? counts.get(category) ?? 0 : 0,
+        // Hidden (by its checkbox or all its sources): what showing it would add, never a misleading 0.
+        count: (visible ? counts : allCounts).get(category) ?? 0,
         dotClass: `cat-dot cat-${slug(category)}`,
       });
       const input = row.querySelector('input');
+      if (!visible) {
+        // Hidden: the count is what showing it would add (muted), never a misleading 0.
+        const count = row.querySelector('.count');
+        count.classList.add('is-hidden');
+        count.append(el('span', 'sr-only', ' hidden'));
+        count.title = `${count.firstChild.textContent} hidden by this filter`;
+      }
       input.indeterminate = visible && shown < total;
       if (input.indeterminate) row.title = `${shown} of ${total} ${category} sources shown`;
       li.append(row);
@@ -345,17 +383,42 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
   container.replaceChildren(...nodes);
 }
 
-export function renderWatchTerms(list, terms) {
+/**
+ * Watchlist chips. Each is a filter: pressing it shows that term's hits alone (pressed again, all
+ * hits), with its hit count under the current category and source filters. The × removes the term.
+ */
+export function renderWatchTerms(list, terms, counts = new Map(), active = null, upgrades = new Map()) {
   list.replaceChildren(
     ...terms.map((term) => {
       const li = el('li', 'chip');
-      li.append(el('span', 'chip-label', term));
+      const count = counts.get(term) ?? 0;
+      const pressed = term === active;
+      li.classList.toggle('is-active', pressed);
+      li.classList.toggle('is-quiet', count === 0);
+      const filter = el('button', 'chip-filter');
+      filter.type = 'button';
+      filter.dataset.watchTerm = term;
+      filter.setAttribute('aria-pressed', String(pressed));
+      filter.setAttribute('aria-label', `${term}: ${count === 1 ? '1 hit' : `${count} hits`}`);
+      filter.title = pressed ? 'Showing only these hits: click to show all watchlist hits' : `Show only hits for ${term}`;
+      filter.append(el('span', 'chip-label', term), el('span', 'chip-count', String(count)));
       const remove = el('button', 'chip-remove');
       remove.type = 'button';
       remove.dataset.removeTerm = term;
       remove.setAttribute('aria-label', `Remove ${term} from watchlist`);
       remove.append(icon('close'));
-      li.append(remove);
+      li.append(filter, remove);
+      const upgrade = upgrades.get(term);
+      if (upgrade) {
+        // "+3 as Zelensky*": the prefix form catches spellings the whole word misses.
+        const offer = el('button', 'chip-upgrade', `+${upgrade.extra} as ${upgrade.variant}`);
+        offer.type = 'button';
+        offer.dataset.upgradeTerm = term;
+        offer.dataset.variant = upgrade.variant;
+        offer.setAttribute('aria-label', `Change ${term} to ${upgrade.variant} to catch ${upgrade.extra} more`);
+        offer.title = `${upgrade.variant} also matches longer words, such as other spellings`;
+        li.append(offer);
+      }
       return li;
     }),
   );
