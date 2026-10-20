@@ -10,8 +10,9 @@
   --border: #e1e4e9;
   --accent: #2453c8;
   --accent-soft: #e7edfb;
-  --cyber: #2563eb;
-  --geo: #0a7380; /* teal: no warm hue, so a Geopolitics byline never reads as an alarm */
+  --cyber: #235594;
+  --geo: #8e24aa; /* purple */
+  --unread: #65a30d; /* lime green */
   --other: #7c3aed;
   --new: #0f6e33;
   --new-soft: #dff4e6;
@@ -45,8 +46,9 @@
     --border: #252e4a;
     --accent: #7aa5ff;
     --accent-soft: #1b2650;
-    --cyber: #7aa5ff;
-    --geo: #3cc6d0;
+    --cyber: #6fa8e8;
+    --geo: #c58cf0;
+    --unread: #a3e635;
     --other: #b794f6;
     --new: #4ade80;
     --new-soft: #10301f;
@@ -75,8 +77,9 @@
   --border: #252e4a;
   --accent: #7aa5ff;
   --accent-soft: #1b2650;
-  --cyber: #7aa5ff;
-  --geo: #3cc6d0;
+  --cyber: #6fa8e8;
+  --geo: #c58cf0;
+  --unread: #a3e635;
   --other: #b794f6;
   --new: #4ade80;
   --new-soft: #10301f;
@@ -671,7 +674,7 @@ kbd {
   height: 6px;
   margin-right: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--unread);
 }
 
 .glyph-saved {
@@ -1888,7 +1891,7 @@ mark.hl-watch {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--unread);
 }
 
 .feed[data-showing="unread"] .item .item-title::before {
