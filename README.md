@@ -5,7 +5,7 @@ reporting from trusted cyber threat intelligence and geopolitical sources and li
 newest first. Every item shows its headline with a short summary underneath, and clicking
 the headline opens the original article in a new tab.
 
-**Dashboard:** https://scyyan.github.io/Owlfeed/ (live after the one-time setup below)
+**Dashboard:** https://scyyan.github.io/Owlfeed/
 
 ## What you get
 
@@ -58,15 +58,7 @@ Each refresh also saves a copy of the feed with its run, and the next refresh pi
 the last successful one. That copy is only used if the live `feed.json` ever answers "not
 found", so a GitHub Pages hiccup can't wipe the 7-day history.
 
-## One-time setup
-
-GitHub Pages is free for public repositories, so:
-
-1. **Make the repository public:** *Settings → General → Danger Zone → Change visibility →
-   Public*.
-2. **Turn on Pages:** *Settings → Pages → Build and deployment → Source:* **GitHub Actions**.
-3. **Merge this work into `main`.** The push to `main` starts the first refresh. After about a
-   minute the dashboard is live at https://scyyan.github.io/Owlfeed/.
+## Force feed refresh
 
 To refresh by hand at any time: *Actions → Refresh feed → Run workflow*.
 
