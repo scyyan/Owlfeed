@@ -119,7 +119,6 @@ export function itemElement(item, ctx) {
   article.dataset.id = item.id;
   const isNew = ctx.isNew(item);
   article.classList.toggle('is-read', ctx.isRead(item.id));
-  article.classList.toggle('is-new', isNew);
   article.classList.toggle('is-watch', item.watch.length > 0);
 
   const body = el('div', 'item-body');
@@ -330,7 +329,6 @@ export function renderCategories(list, categories, hidden, counts, sourceState =
       });
       const input = row.querySelector('input');
       if (!visible) {
-        // Hidden: the count is what showing it would add (muted), never a misleading 0.
         const count = row.querySelector('.count');
         count.classList.add('is-hidden');
         count.append(el('span', 'sr-only', ' hidden'));
@@ -366,8 +364,8 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
   for (const group of groups.values()) {
     const wrapper = el('details', 'source-group');
     wrapper.dataset.group = group.title;
-    wrapper.classList.toggle('is-muted', hiddenCategories.has(group.category));
     const categoryHidden = hiddenCategories.has(group.category);
+    wrapper.classList.toggle('is-muted', categoryHidden);
     // A hidden category shows none of its sources, whatever their own checkboxes say.
     const shown = categoryHidden ? 0 : group.sources.filter((s) => !hiddenSources.has(s.id)).length;
     const failing = group.sources.filter((s) => s.status !== 'ok').length;
@@ -411,10 +409,6 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
 }
 
 /**
- * Watchlist chips. Each is a filter: pressing it shows that term's hits alone (pressed again, all
- * hits), with its hit count under the current category and source filters. The × removes the term.
- */
-/**
  * Terms whose prefix form would catch more, gathered into one quiet line under the chips
  * ("2 terms could catch more · Review"); Review lists each offer: "Zelensky → Zelensky* (+3)".
  */
@@ -445,6 +439,10 @@ export function renderWatchUpgrades(box, upgrades, open) {
   box.append(list, el('p', 'hint', 'A trailing * also matches longer words, such as other spellings.'));
 }
 
+/**
+ * Watchlist chips. Each is a filter: pressing it shows that term's hits alone (pressed again, all
+ * hits), with its hit count under the current category and source filters. The × removes the term.
+ */
 export function renderWatchTerms(list, terms, counts = new Map(), active = null) {
   list.replaceChildren(
     ...terms.map((term) => {

@@ -24,7 +24,6 @@ MAX_ITEMS = 6000
 TOMBSTONE_DAYS = 30
 # Far more than the feeds can list at once; only bounds a corrupt or injected restored state.
 MAX_TOMBSTONES = 5000
-# Restored items dated later than this are corrupt (or injected) and are dropped.
 
 log = logging.getLogger(__name__)
 

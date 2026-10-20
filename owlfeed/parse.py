@@ -15,7 +15,8 @@ import feedparser
 from .config import FUTURE_TOLERANCE, Settings, Source, is_http_url
 from .text import clean_title, make_summary, truncate
 
-# Dates further ahead than this are treated as bogus (timezone bugs, scheduled posts).
+# Tried in order when feedparser cannot read a date. Day and month names assume an English (or C)
+# locale, which is what the GitHub runners use.
 FALLBACK_DATE_FORMATS = (
     "%a, %d %b %Y %H:%M:%S",  # RFC 822 without a zone, which feedparser rejects
     "%a, %d %b %Y %H:%M",

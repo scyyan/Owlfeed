@@ -101,8 +101,10 @@ def fetch(
     if last_modified:
         headers["If-Modified-Since"] = last_modified
 
+    retryable_error: str | None = None
+    last_status: int | None = None  # kept so "HTTP 503" still reports 503 once the retries run out
     for attempt in range(retries + 1):
-        retryable_error: str | None = None
+        retryable_error, last_status = None, None
         try:
             with get(url, headers=headers, timeout=TIMEOUT, stream=True, allow_redirects=True) as response:
                 # Feeds must be https (see config.py); refuse a redirect that downgrades to http.
@@ -116,7 +118,7 @@ def fetch(
                         last_modified=response.headers.get("Last-Modified") or last_modified,
                     )
                 if status in RETRY_STATUSES:
-                    retryable_error = f"HTTP {status}"
+                    retryable_error, last_status = f"HTTP {status}", status
                 elif status >= 400:
                     return FetchResult(status=status, error=f"HTTP {status}")
                 else:
@@ -137,7 +139,7 @@ def fetch(
             return FetchResult(error=_describe(exc))
         if attempt < retries:
             sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
-    return FetchResult(error=retryable_error)
+    return FetchResult(status=last_status, error=retryable_error)
 
 
 def fetch_all(

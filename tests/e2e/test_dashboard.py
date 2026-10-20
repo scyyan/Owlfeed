@@ -250,7 +250,7 @@ def test_backup_and_restore(page, server, tmp_path):
     expect(page.locator(".chip-label")).to_have_count(0)
     page.locator("#import-input").set_input_files(str(backup))
     expect(page.locator(".chip-label")).to_have_text(["Examplia"])
-    expect(page.locator("#status")).to_contain_text("1 watchlist terms added")
+    expect(page.locator("#status")).to_contain_text("1 watchlist term added")
 
 
 def hide_and_show(page, away_ms):
@@ -412,7 +412,7 @@ def test_restore_from_the_phone_drawer_is_announced(make_page, server, tmp_path)
     with page.expect_file_chooser() as chooser:
         page.get_by_role("button", name="Restore").click()
     chooser.value.set_files(str(backup))
-    expect(page.locator("#announcer")).to_contain_text("1 watchlist terms added")
+    expect(page.locator("#announcer")).to_contain_text("1 watchlist term added")
     assert page.evaluate("document.getElementById('announcer').closest('[inert]')") is None
     expect(page.locator("#status")).to_be_visible()
 
@@ -973,9 +973,10 @@ def test_sidebar_counts_follow_the_search(page, server):
     all_count = page.locator('[data-view="all"] .count')
     expect(all_count).to_have_text(str(len(ITEMS)))
     page.get_by_role("searchbox").fill("Example*")
+    expect(page.locator("#sidebar")).to_have_class(re.compile(r"\bis-searching\b"))  # the debounce has fired
     shown = page.locator("article.item").count()
+    assert 0 < shown < len(ITEMS)  # the search really narrowed the list
     expect(all_count).to_have_text(str(shown))
-    expect(page.locator("#sidebar")).to_have_class(re.compile(r"\bis-searching\b"))
 
 
 def test_empty_state_names_and_lifts_the_hiding_filter(page, server):
@@ -1136,3 +1137,54 @@ def test_saved_view_says_when_filters_hide_saved_items(page, server):
     expect(note).to_contain_text("1 saved item hidden by your filters")
     note.get_by_role("button", name="Show them").click()
     expect(page.locator("article.item")).to_have_count(2)
+
+
+def test_failed_first_load_retries_on_its_own(make_page, server):
+    server.remove_feed()
+    page = make_page()
+    page.clock.install(time=NOW)
+    page.goto(server.url)
+    expect(page.get_by_text("No feed data published yet")).to_be_visible()
+    server.write_feed(build_feed())
+    page.clock.run_for(61_000)  # RETRY_MS in app.js
+    expect(page.locator("article.item").first).to_be_visible()
+
+
+def test_restore_applies_the_backed_up_density_at_once(page, server, tmp_path):
+    backup = tmp_path / "backup.json"
+    backup.write_text(
+        '{"app": "owlfeed", "version": 1, "prefs": {"view": "all", "density": "compact"}}', encoding="utf-8"
+    )
+    open_dashboard(page, server)
+    expect(page.locator("#feed")).to_have_attribute("data-density", "comfortable")
+    page.locator("#import-input").set_input_files(str(backup))
+    expect(page.locator("#feed")).to_have_attribute("data-density", "compact")
+    expect(page.locator("#density-btn")).to_have_attribute("aria-pressed", "true")
+
+
+def test_another_tabs_prefs_are_picked_up_not_overwritten(page, server):
+    open_dashboard(page, server)
+    other = page.context.new_page()
+    other.clock.set_fixed_time(NOW)
+    open_dashboard(other, server)
+    other.keyboard.press("d")
+    expect(page.locator("#feed")).to_have_attribute("data-density", "compact")
+    # A save from the first tab now keeps the other tab's density instead of reverting it.
+    page.get_by_role("checkbox", name="Geopolitics").uncheck()
+    stored = page.evaluate("JSON.parse(localStorage.getItem('owlfeed:v1:prefs')).density")
+    assert stored == "compact"
+
+
+def test_shortcuts_still_work_after_ticking_a_checkbox(page, server):
+    open_dashboard(page, server)
+    page.get_by_role("checkbox", name="Geopolitics").uncheck()
+    page.keyboard.press("d")
+    expect(page.locator("#feed")).to_have_attribute("data-density", "compact")
+
+
+def test_phone_freshness_label_uses_short_ages(make_page, server):
+    server.write_feed(build_feed(generated_at=NOW - timedelta(minutes=9)))
+    page = make_page(viewport=(390, 844))
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    expect(page.locator("#watch-short")).to_have_text("9m")

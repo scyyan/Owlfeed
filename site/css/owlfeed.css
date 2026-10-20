@@ -11,13 +11,12 @@
   --accent: #2453c8;
   --accent-soft: #e7edfb;
   --cyber: #2563eb;
-  --cyber-ink: #2563eb;
   --geo: #0a7380; /* teal: no warm hue, so a Geopolitics byline never reads as an alarm */
-  --geo-ink: #0a7380;
   --other: #7c3aed;
   --new: #0f6e33;
   --new-soft: #dff4e6;
   --watch: #a15c00;
+  --shadow-pop: 0 6px 18px rgb(0 0 0 / 18%); /* dialogs, popovers and toasts */
   --watch-soft: #fdf0d9;
   --watch-wash: #fef6e8;
   --mark: #ffe58f;
@@ -47,9 +46,7 @@
     --accent: #7aa5ff;
     --accent-soft: #1b2650;
     --cyber: #7aa5ff;
-    --cyber-ink: #7aa5ff;
     --geo: #3cc6d0;
-    --geo-ink: #3cc6d0;
     --other: #b794f6;
     --new: #4ade80;
     --new-soft: #10301f;
@@ -79,9 +76,7 @@
   --accent: #7aa5ff;
   --accent-soft: #1b2650;
   --cyber: #7aa5ff;
-  --cyber-ink: #7aa5ff;
   --geo: #3cc6d0;
-  --geo-ink: #3cc6d0;
   --other: #b794f6;
   --new: #4ade80;
   --new-soft: #10301f;
@@ -182,7 +177,7 @@ kbd {
   border-radius: 12px;
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-pop);
 }
 
 .help::backdrop {
@@ -222,7 +217,6 @@ kbd {
 }
 
 .keys.terms {
-  grid-template-columns: max-content 1fr;
   margin-bottom: 4px;
 }
 
@@ -281,6 +275,7 @@ kbd {
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh; /* the visible height on phones (Safari's toolbar); falls back to 100vh */
   overflow-y: auto;
   scrollbar-gutter: stable; /* content doesn't shift when the list grows past the screen */
   padding: 16px 14px 24px;
@@ -308,6 +303,7 @@ kbd {
 }
 
 .brand-name {
+  margin: 0;
   font-weight: 700;
   font-size: 18px;
   letter-spacing: 0.2px;
@@ -599,12 +595,12 @@ kbd {
   color: var(--surface);
 }
 
-/* "+3 as Zelensky*": the upgrade offer, inside the chip after the ×. */
 .item-summary.is-snippet {
   color: var(--text-2);
 }
 
 /* "2 terms could catch more · Review": one quiet line under the chips, not an offer per chip. */
+/* Prefix upgrades under the chips: "Zelensky → Zelensky* (+3)". */
 .watch-upgrades {
   padding: 6px 6px 0;
   font-size: 12.5px;
@@ -712,8 +708,8 @@ kbd {
 .chip-remove {
   display: inline-grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 24px; /* WCAG 2.2 minimum target size */
+  height: 24px;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -776,7 +772,6 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-/* Phones keep "mark all read" in the drawer, not beside the search box (see the 600px query). */
 .icon-btn[aria-pressed="true"] {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   background: var(--accent-soft);
@@ -798,6 +793,7 @@ kbd {
   display: none;
 }
 
+/* Phones keep "mark all read" in the drawer, not beside the search box (see the 600px query). */
 .mark-all-section {
   display: none;
 }
@@ -814,12 +810,6 @@ kbd {
   font-size: 13px;
 }
 
-.btn-ghost {
-  border-color: transparent;
-  background: transparent;
-  color: var(--text-2);
-}
-
 .icon-btn {
   display: inline-grid;
   place-items: center;
@@ -833,8 +823,7 @@ kbd {
   cursor: pointer;
 }
 
-.icon-btn:hover,
-.btn-ghost:hover:not(:disabled) {
+.icon-btn:hover {
   background: var(--surface-2);
   color: var(--text);
 }
@@ -934,6 +923,7 @@ kbd {
   top: 50%;
   transform: translateY(-50%);
   color: var(--muted);
+  pointer-events: none; /* clicks fall through to the input */
 }
 
 .search input {
@@ -1105,7 +1095,7 @@ kbd {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-pop);
   font-size: 13px;
 }
 
@@ -1463,7 +1453,7 @@ kbd {
   color: var(--on-accent);
   font-weight: 600;
   font-size: 13.5px;
-  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-pop);
   cursor: pointer;
 }
 
@@ -1482,7 +1472,7 @@ kbd {
   background: var(--text);
   color: var(--bg);
   font-size: 13.5px;
-  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-pop);
   pointer-events: none; /* never blocks a tap on the buttons beneath it... */
 }
 
@@ -1608,16 +1598,18 @@ kbd {
   text-decoration: none;
 }
 
-.item-title a:hover {
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
 .item-title a:visited,
 .item.is-read .item-title a {
   color: var(--muted);
   font-weight: 550;
+}
+
+/* After the read rule, and as specific, so read and visited headlines also turn blue on hover. */
+.item-title a:hover,
+.item.is-read .item-title a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .item-meta {
@@ -1640,11 +1632,11 @@ kbd {
 
 /* The domain reads at a glance: source names carry their category's ink. */
 .item-source.cat-cyber {
-  color: var(--cyber-ink);
+  color: var(--cyber);
 }
 
 .item-source.cat-geopolitics {
-  color: var(--geo-ink);
+  color: var(--geo);
 }
 
 .item-source::before {
@@ -1746,6 +1738,11 @@ mark.hl-watch.hl-search {
   background: var(--mark);
   box-shadow: none;
   border-radius: 3px;
+}
+
+/* Faded read text must not fade the highlighted term: full ink on the amber tint keeps AA. */
+mark.hl-watch {
+  color: var(--text);
 }
 
 .filters-tip {
@@ -2378,5 +2375,26 @@ html:not([data-app]) .loading {
     animation: none;
     outline: 2px solid var(--watch);
     outline-offset: 1px;
+  }
+}
+
+/* Windows High Contrast and other forced-colour modes drop backgrounds, so markers drawn only
+   with a background (dots, selected views, pressed toggles) get a system colour or an outline. */
+@media (forced-colors: active) {
+  .item:not(.is-read) .item-title::before,
+  .cat-dot,
+  .health-dot,
+  .item-source::before,
+  .glyph-unread {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+
+  .view-btn[aria-current="true"],
+  .tab[aria-current="true"],
+  .icon-btn[aria-pressed="true"],
+  .btn-save[aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
 }

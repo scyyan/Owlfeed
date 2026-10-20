@@ -82,6 +82,18 @@ def test_redirects_to_plain_http_are_refused():
     assert len(get.calls) == 1
 
 
+def test_exhausted_retries_keep_the_last_status():
+    get = Recorder(FakeResponse(503), FakeResponse(503))
+    result = fetch("https://a.example/feed", get=get, sleep=no_sleep)
+    assert (result.status, result.error) == (503, "HTTP 503")
+
+
+def test_a_timeout_after_a_503_reports_no_status():
+    get = Recorder(FakeResponse(503), requests.Timeout())
+    result = fetch("https://a.example/feed", get=get, sleep=no_sleep)
+    assert result.status is None and result.error
+
+
 def test_client_errors_are_not_retried():
     get = Recorder(FakeResponse(403))
     result = fetch("https://a.example/feed", get=get, sleep=no_sleep)

@@ -6,6 +6,8 @@
 // writing (read-modify-write) instead of writing back a possibly stale in-memory copy, and
 // other tabs' changes arrive through the browser's "storage" event (see listen()).
 
+import { normalizeTerm } from './watchlist.js';
+
 const PREFIX = 'owlfeed:v1:';
 const READ_TTL_DAYS = 30;
 const DAY = 86_400_000;
@@ -215,8 +217,14 @@ export function createStorage(backend = defaultBackend()) {
       }
       let termsAdded = 0;
       this.updateWatchlist((terms) => {
+        // Imported terms get the same cleanup as typed ones, so each chip can match its hits.
         const lower = new Set(terms.map((t) => t.toLowerCase()));
-        const fresh = stringList(data.watchlist).filter((t) => t.trim() && !lower.has(t.toLowerCase()));
+        const fresh = [];
+        for (const term of stringList(data.watchlist).map(normalizeTerm)) {
+          if (!term || term === '*' || lower.has(term.toLowerCase())) continue;
+          lower.add(term.toLowerCase());
+          fresh.push(term);
+        }
         termsAdded = fresh.length;
         return [...terms, ...fresh];
       });

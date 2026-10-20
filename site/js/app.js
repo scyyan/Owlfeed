@@ -1363,12 +1363,19 @@ function exportSettings() {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
-function reloadFromStorage() {
+/**
+ * Re-read prefs and the watchlist after a restore or another tab's change. With keepView, this
+ * tab stays on the view it is showing; filters and density follow what was stored.
+ */
+function reloadFromStorage({ keepView = false } = {}) {
+  const view = state.prefs.view;
   state.prefs = storage.prefs();
   applyDefaultDensity();
+  if (keepView) state.prefs.view = view;
   if (!VIEWS.includes(state.prefs.view)) state.prefs.view = 'all';
   state.terms = storage.watchlist();
   recomputeWatch();
+  syncDensity();
   renderAll();
 }
 
@@ -1376,7 +1383,7 @@ async function importSettings(file) {
   try {
     const result = storage.importData(JSON.parse(await file.text()));
     reloadFromStorage();
-    announce(`Restored: ${result.saved} saved items and ${result.terms} watchlist terms added`);
+    announce(`Restored: ${plural(result.saved, 'saved item')} and ${plural(result.terms, 'watchlist term')} added`);
   } catch (error) {
     announce(`Couldn't restore: ${error instanceof SyntaxError ? 'the file is not valid JSON' : error.message}`);
   }
@@ -1716,7 +1723,8 @@ function wireEvents() {
   });
 
   document.addEventListener('keydown', (event) => {
-    const typing = event.target.closest?.('input, textarea, select, [contenteditable="true"]');
+    // Checkboxes and radios take no typing, so shortcuts keep working after one is ticked.
+    const typing = event.target.closest?.('input:not([type="checkbox"], [type="radio"]), textarea, select, [contenteditable="true"]');
     if (!typing && handleShortcut(event)) {
       event.preventDefault();
       return;
@@ -1765,10 +1773,12 @@ function wireEvents() {
   });
   window.addEventListener('pagehide', rememberVisit);
 
-  // Read/saved/watchlist changes made in another tab.
+  // Read/saved/watchlist/prefs changes made in another tab. Prefs are re-read so this tab's next
+  // save cannot write its stale copy over them.
   storage.listen((key) => {
     if (!state.data) return;
-    if (key === null || key === 'watchlist') {
+    if (key === 'prefs') reloadFromStorage({ keepView: true });
+    else if (key === null || key === 'watchlist') {
       state.terms = storage.watchlist();
       recomputeWatch();
       renderAll();
