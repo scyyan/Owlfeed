@@ -6,10 +6,12 @@ colors:
   night-sky-blue-soft: "#e7edfb"
   night-sky-blue-dark: "#7aa5ff"
   night-sky-blue-soft-dark: "#1b2650"
-  cyber-blue: "#2563eb"
-  cyber-blue-dark: "#7aa5ff"
-  geopolitics-teal: "#0a7380"
-  geopolitics-teal-dark: "#3cc6d0"
+  cyber-blue: "#235594"
+  cyber-blue-dark: "#6fa8e8"
+  geopolitics-purple: "#8e24aa"
+  geopolitics-purple-dark: "#c58cf0"
+  unread-lime: "#65a30d"
+  unread-lime-dark: "#a3e635"
   other-violet: "#7c3aed"
   other-violet-dark: "#b794f6"
   owls-eye-amber: "#a15c00"
@@ -213,8 +215,8 @@ mean exactly one thing.
 ### Primary
 - **Night Sky Blue** (#2453c8 light; #7aa5ff dark): action and current state. It marks the
   selected sidebar view and phone tab (on its soft tint, #e7edfb / #1a2640), title hover, link
-  buttons, checkbox accents, focus rings, the "↑ N new items" pill, and the 6px unread dot beside
-  an unread headline (still to do is a current state).
+  buttons, checkbox accents, focus rings, the "↑ N new items" pill, and
+  focus. (The unread dot is Unread Lime, below.)
 
 ### Secondary
 - **Owl's-Eye Amber** (#a15c00 light; #f5c451 dark): what the owl has noticed. It's used for
@@ -234,9 +236,9 @@ mean exactly one thing.
   dots and labels, the "updated N hours ago" warning, and the stale-data banner.
 
 ### Category hues
-- **Cyber Blue** (#2563eb light; #7aa5ff dark): the dot for Cyber sources, and the ink of
+- **Cyber Blue** (#235594 light; #6fa8e8 dark): the dot for Cyber sources, and the ink of
   Cyber source names in item rows.
-- **Geopolitics Teal** (#0a7380 light; #3cc6d0 dark): the dot and the byline ink for
+- **Geopolitics Purple** (#8e24aa light; #c58cf0 dark): the dot and the byline ink for
   Geopolitics sources. It replaced an ember orange that sat too close to Alarm Rust and Owl's-Eye
   Amber: no category may borrow a warm hue, because warm hues mean watchlist, saved or failure.
 - **Other Violet** (#7c3aed light; #b794f6 dark): the fallback dot for any future category.
@@ -438,7 +440,7 @@ is a meta row: the source name at 650 weight in its category ink with its dot, t
 the relative age, and badges (the watchlist badge carries a drawn eye). Then comes the summary.
 Save (star) and read (ring) buttons are stacked on the right as firm 34px squares. The keyboard
 cursor (Tab or j/k) tints the whole row with Night Sky Blue's soft tint, not just the headline. Saved fills
-the star in Saved Amber on the amber tint. Unread rows carry the mark: a 6px Night Sky Blue dot
+the star in Saved Amber on the amber tint. Unread rows carry the mark: a 6px Unread Lime dot (#65a30d light; #a3e635 dark)
 in the gutter, centred on the headline's first line (none in the Unread view, where every row is
 unread). Read is the quiet state: the ring fills with a Slate Muted check, with no tint, and the
 headline and summary fade to Slate Muted. Undated
