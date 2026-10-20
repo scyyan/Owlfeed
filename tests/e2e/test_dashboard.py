@@ -165,7 +165,8 @@ def test_auto_refresh_adds_new_items(make_page, server):
     page = make_page()
     page.clock.install(time=NOW)
     open_dashboard(page, server)
-    expect(page.locator("#new-chip")).to_be_hidden()  # first visit: nothing is "new" yet
+    # First visit: the last 24 hours count as new, so the New view starts useful.
+    expect(page.locator("#new-chip")).to_be_visible()
 
     server.write_feed(build_feed(extra_items=[breaking_item()], generated_at=NOW + timedelta(minutes=5)))
     # Just past the 5-minute poll, so the 4-second "added" toast is still showing.
@@ -187,7 +188,7 @@ def test_new_items_wait_behind_a_pill_when_scrolled_down(make_page, server):
     server.write_feed(build_feed(extra_items=[breaking_item()], generated_at=NOW + timedelta(minutes=5)))
     page.clock.run_for(5 * 60_000 + 31_000)
     pill = page.locator("#new-pill")
-    expect(pill).to_have_text("↑ 1 new item")
+    expect(pill).to_have_text("↑ 1 just arrived")
     expect(page.get_by_text("Breaking: sample item")).to_have_count(0)
     pill.click()
     expect(item(page, "Breaking: sample item")).to_be_visible()
@@ -454,21 +455,22 @@ def test_focus_stays_in_the_feed_when_its_last_item_goes(make_page, server):
     server.write_feed(feed)
     page.clock.run_for(5 * 60_000 + 1_000)
     expect(page.get_by_text('Nothing matches "Advisory: Critical flaw"')).to_be_visible()
-    assert page.evaluate("document.activeElement.dataset.emptyAction") == "clear"
+    # Only the search narrows the view, so the empty state offers to clear just that.
+    assert page.evaluate("document.activeElement.dataset.emptyAction") == "clear-search"
 
 
 def test_clear_filters_focus_depends_on_how_it_was_pressed(page, server):
     open_dashboard(page, server)
     search = page.get_by_role("searchbox")
     search.fill("no such thing")
-    page.get_by_role("button", name="Clear filters").click()
+    page.get_by_role("button", name="Clear search").click()
     expect(page.locator("article.item")).to_have_count(len(ITEMS))
     # A tap or click goes to the newest item, so no on-screen keyboard opens over the feed...
     assert page.evaluate("document.activeElement.closest('.item-title') !== null")
     assert page.evaluate("document.activeElement.closest('article').dataset.id") == "i01"
     # ...while the keyboard continues in the search box.
     search.fill("no such thing")
-    page.get_by_role("button", name="Clear filters").press("Enter")
+    page.get_by_role("button", name="Clear search").press("Enter")
     expect(page.locator("article.item")).to_have_count(len(ITEMS))
     assert page.evaluate("document.activeElement.id") == "search"
 
@@ -500,7 +502,8 @@ def test_focus_stays_on_an_empty_state_without_a_button_across_refreshes(make_pa
 def test_bar_clear_focus_depends_on_how_it_was_pressed(page, server):
     open_dashboard(page, server)
     search = page.get_by_role("searchbox")
-    clear = page.locator("#active-filters").get_by_role("button", name="Clear", exact=True)
+    # The search's own token: removing the last filter goes where Clear used to.
+    clear = page.locator("#active-filters").get_by_role("button", name="Remove filter: Search: Example*")
     search.fill("Example*")
     expect(page.locator("article.item").first).to_be_visible()
     clear.click()
@@ -703,7 +706,7 @@ def test_only_opens_just_the_group_it_affects_and_clear_folds_it_again(page, ser
     research = page.locator(".source-group", has=page.locator(".source-row", has_text="Sample Threat Research"))
     expect(research).not_to_have_attribute("open", "")  # all off: its "0/1" tally says it all
     expect(research.locator(".group-tally")).to_have_text("0/1")
-    page.locator("#active-filters").get_by_role("button", name="Clear").click()
+    page.locator("#active-filters").get_by_role("button", name="Remove filter: Only Sample CERT").click()
     expect(research).not_to_have_attribute("open", "")
     expect(cert).to_have_attribute("open", "")  # the reader opened this one
     # Only the failing group is open by itself.
@@ -828,7 +831,8 @@ def test_category_checkboxes_agree_with_source_filters(page, server):
     page.locator(".source-group", has=page.locator(".source-row", has_text="Sample CERT")).locator("summary").click()
     page.get_by_role("button", name="Show only Sample CERT").click()
     expect(geo).not_to_be_checked()
-    expect(page.locator(".check-row", has=geo).locator(".count")).to_have_text("0")
+    # Hidden: the muted count says what showing it would add, never a bare 0.
+    expect(page.locator(".check-row", has=geo).locator(".count")).to_have_text(re.compile(r"^[1-9]\d* hidden$"))
     assert page.evaluate("document.querySelector('[data-category=\"Cyber\"]').indeterminate")
     cyber.click()  # "show all of Cyber"
     expect(cyber).to_be_checked()
@@ -914,3 +918,112 @@ def test_suggestion_from_the_keyboard_keeps_focus_in_the_results(page, server):
     page.keyboard.press("Enter")
     expect(page.get_by_role("searchbox")).to_have_value("Examp*")
     assert page.evaluate("document.activeElement.closest('article') !== null"), page.evaluate("document.activeElement.tagName")
+
+
+def test_filter_tokens_remove_one_constraint_and_keep_the_rest(page, server):
+    open_dashboard(page, server)
+    page.get_by_role("checkbox", name="Geopolitics").uncheck()
+    page.get_by_role("searchbox").fill("Example*")
+    bar = page.locator("#active-filters")
+    expect(bar.get_by_role("button", name="Clear all")).to_be_visible()
+    bar.get_by_role("button", name="Remove filter: Search: Example*").press("Enter")
+    expect(page.get_by_role("searchbox")).to_have_value("")
+    expect(page.get_by_role("checkbox", name="Geopolitics")).not_to_be_checked()  # the category filter stays
+    expect(bar.get_by_role("button", name="Clear all")).to_have_count(0)  # one token left: its × is enough
+    assert page.evaluate("document.activeElement.dataset.clearFilter") == "categories"
+
+
+def test_watchlist_chip_filters_to_one_terms_hits(page, server):
+    open_dashboard(page, server)
+    page.get_by_label("Add a watchlist term").fill("Example*")
+    page.get_by_label("Add a watchlist term").press("Enter")
+    page.get_by_label("Add a watchlist term").fill("ransomware")
+    page.get_by_label("Add a watchlist term").press("Enter")
+    chip = page.locator("[data-watch-term='ransomware']")
+    expect(chip).to_have_attribute("aria-label", re.compile(r"^ransomware: \d+ hits?$"))
+    hits = int(chip.locator(".chip-count").inner_text())
+    chip.click()
+    expect(chip).to_have_attribute("aria-pressed", "true")
+    expect(page.locator("article.item")).to_have_count(hits)
+    expect(page.locator("#active-filters")).to_contain_text("Term: ransomware")
+    chip.click()  # pressed again: all watchlist hits
+    expect(chip).to_have_attribute("aria-pressed", "false")
+    expect(page.locator("#active-filters")).not_to_contain_text("Term:")
+
+
+def test_compact_rows_hide_summaries_and_persist(page, server):
+    open_dashboard(page, server)
+    expect(page.locator(".item-summary").first).to_be_visible()
+    page.keyboard.press("d")
+    expect(page.locator("#feed")).to_have_attribute("data-density", "compact")
+    expect(page.locator("#density-btn")).to_have_attribute("aria-pressed", "true")
+    expect(page.locator(".item-summary").first).to_be_hidden()
+    page.reload()
+    expect(page.locator("#feed")).to_have_attribute("data-density", "compact")
+
+
+def test_sidebar_counts_follow_the_search(page, server):
+    open_dashboard(page, server)
+    all_count = page.locator('[data-view="all"] .count')
+    expect(all_count).to_have_text(str(len(ITEMS)))
+    page.get_by_role("searchbox").fill("Example*")
+    shown = page.locator("article.item").count()
+    expect(all_count).to_have_text(str(shown))
+    expect(page.locator("#sidebar")).to_have_class(re.compile(r"\bis-searching\b"))
+
+
+def test_empty_state_names_and_lifts_the_hiding_filter(page, server):
+    open_dashboard(page, server)
+    page.get_by_role("checkbox", name="Geopolitics").uncheck()
+    page.get_by_role("searchbox").fill("World*")
+    lift = page.get_by_role("button", name="Show Geopolitics too")
+    expect(page.locator(".empty")).to_contain_text("hidden by the category filter")
+    lift.click()
+    expect(page.locator("article.item").first).to_be_visible()
+    expect(page.get_by_role("searchbox")).to_have_value("World*")  # the search stays
+
+
+def test_briefing_views_lead_with_hits_and_end_with_a_finish_line(page, server):
+    open_dashboard(page, server)
+    page.get_by_label("Add a watchlist term").fill("ExampleVPN")
+    page.get_by_label("Add a watchlist term").press("Enter")
+    page.locator('[data-view="unread"]').click()
+    pinned = page.locator(".day-pinned")
+    expect(pinned.locator(".day-title")).to_have_text("Watchlist hits")
+    expect(pinned.locator("article.is-watch").first).to_be_visible()
+    # Every hit is in the pinned section, not repeated in the timeline below.
+    assert page.locator(".day:not(.day-pinned) article.is-watch").count() == 0
+    expect(page.locator(".briefing")).to_contain_text("watchlist hit")
+    expect(page.locator(".caught-up")).to_be_visible()
+    page.locator('[data-view="all"]').click()  # All keeps strict time order
+    expect(page.locator(".day-pinned")).to_have_count(0)
+
+
+def test_briefing_ends_with_a_scoped_mark_read_and_only_then_says_caught_up(page, server):
+    open_dashboard(page, server)
+    page.locator('[data-view="unread"]').click()
+    end = page.locator(".caught-up")
+    expect(end).to_contain_text(f"{len(ITEMS)} unread items")
+    end.get_by_role("button", name=f"Mark these {len(ITEMS)} read").click()
+    expect(page.get_by_text("You're all caught up")).to_be_visible()
+    expect(page.locator("#status").get_by_role("button", name="Undo")).to_be_visible()
+
+
+def test_a_whole_word_term_offers_its_prefix_form_when_that_catches_more(page, server):
+    open_dashboard(page, server)
+    page.get_by_label("Add a watchlist term").fill("Example")
+    page.get_by_label("Add a watchlist term").press("Enter")
+    offer = page.locator("[data-upgrade-term='Example']")
+    expect(offer).to_have_text(re.compile(r"^\+\d+ as Example\*$"))
+    offer.click()
+    expect(page.locator("[data-watch-term='Example*']")).to_be_focused()
+    expect(page.locator("[data-upgrade-term]")).to_have_count(0)
+
+
+def test_briefing_summary_counts_are_filters(page, server):
+    open_dashboard(page, server)
+    page.locator('[data-view="unread"]').click()
+    summary = page.get_by_role("list", name="Briefing summary")
+    summary.get_by_role("button", name=re.compile(r"Cyber$")).click()
+    expect(page.get_by_role("checkbox", name="Geopolitics")).not_to_be_checked()
+    expect(page.locator('[data-view="unread"]')).to_have_attribute("aria-current", "true")  # still the briefing

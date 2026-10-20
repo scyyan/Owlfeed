@@ -193,7 +193,7 @@ kbd {
 
 .help-title {
   margin: 0;
-  font-size: 16.5px;
+  font-size: 17.5px;
   font-weight: 650;
 }
 
@@ -214,6 +214,16 @@ kbd {
   margin: 0;
   color: var(--text-2);
   font-size: 14px;
+}
+
+.keys.terms {
+  grid-template-columns: max-content 1fr;
+  margin-bottom: 4px;
+}
+
+.keys.terms dt {
+  font-weight: 650;
+  font-size: 13px;
 }
 
 .help-subtitle {
@@ -529,13 +539,83 @@ kbd {
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px 4px 2px 9px;
+  gap: 0;
+  padding: 2px 3px 2px 2px;
   border-radius: 999px;
   background: var(--watch-soft);
   color: var(--watch);
   font-size: 12.5px;
   font-weight: 600;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+/* The chip's body is a filter toggle: that term's hits alone. */
+.chip-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chip-filter:hover {
+  background: var(--hover-tint);
+}
+
+.chip-count {
+  min-width: 1.4em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--watch) 14%, transparent);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 17px;
+  text-align: center;
+}
+
+/* Pressed: the timeline shows only this term's hits. Same outline language as the New chip. */
+.chip.is-active {
+  outline: 2px solid var(--watch);
+  outline-offset: 0;
+}
+
+.chip.is-active .chip-count {
+  background: var(--watch);
+  color: var(--surface);
+}
+
+/* "+3 as Zelensky*": the upgrade offer, inside the chip after the ×. */
+.chip-upgrade {
+  min-height: 24px;
+  margin-left: 2px;
+  padding: 0 8px;
+  border: 1px dashed color-mix(in srgb, var(--watch) 55%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.chip-upgrade:hover {
+  border-style: solid;
+  background: var(--hover-tint);
+}
+
+/* No hits right now: still listed, just quieter, so the terms with hits lead. */
+.chip.is-quiet .chip-count {
+  background: transparent;
+  color: var(--muted);
 }
 
 /* "Already on your watchlist": the existing chip answers with one pulse. */
@@ -622,7 +702,28 @@ kbd {
 }
 
 /* Phones keep "mark all read" in the drawer, not beside the search box (see the 600px query). */
+.icon-btn[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.density-link,
+.labels-link,
+.title-touch {
+  display: none;
+}
+
+.density-link[aria-pressed="true"] {
+  color: var(--accent);
+  font-weight: 650;
+}
+
 .theme-link {
+  display: none;
+}
+
+.mark-all-section {
   display: none;
 }
 
@@ -1021,6 +1122,12 @@ kbd {
   margin: 0;
 }
 
+.stale-short {
+  display: none;
+  flex: 1 1 auto;
+  margin: 0;
+}
+
 .stale-dismiss {
   color: var(--error);
   font-weight: 650;
@@ -1044,14 +1151,203 @@ kbd {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 6px 10px;
   margin: 6px 0 2px;
-  padding: 8px 12px;
+  padding: 6px 8px 6px 12px;
   border-radius: 10px;
   background: var(--accent-soft);
   font-size: 13px;
   color: var(--text-2);
+}
+
+.active-filters.is-idle {
+  display: none;
+}
+
+.filters-view {
+  color: var(--text-2);
+}
+
+/* While searching, every sidebar count is a match count: it takes the search blue. */
+.sidebar.is-searching .view-btn .count,
+.sidebar.is-searching .check-row .count {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.meta-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* A long source name may wrap inside itself; its separator still ends it. */
+.meta-part:first-child {
+  min-width: 0;
+  white-space: normal;
+}
+
+.briefing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin: 12px 2px 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.briefing-part + .briefing-part::before {
+  content: "·";
+  margin: 0 8px;
+  color: var(--muted);
+}
+
+/* A count that filters: underlined on hover, like the other link buttons. */
+.briefing-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text-2) 35%, transparent);
+  text-underline-offset: 3px;
+}
+
+.briefing-link:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+
+.briefing strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* Hits first: the section header takes the owl's amber; inside it the badge carries the signal. */
+.day-pinned .day-title {
+  color: var(--watch);
+}
+
+.feed .day-pinned .item.is-watch:not(:has(:focus-visible)) {
+  background: var(--surface);
+}
+
+.caught-up {
+  margin: 28px 0 0;
+  padding: 18px 16px 0;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.caught-up-title {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.caught-up-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.caught-up-action {
+  margin-top: 12px;
+}
+
+/* "Show all 38 hits here": a quiet link under the pinned rows, inside the section's frame. */
+.pinned-toggle {
+  display: block;
+  margin: 8px 2px 0;
+}
+
+/* In the New view every row is new: the badge would mark nothing. */
+.feed[data-showing="new"] .badge-new {
+  display: none;
+}
+
+.filters-variant {
+  order: 3;
+  font-weight: 650;
+}
+
+/* A hidden category's count: what showing it would add, muted and in brackets. */
+.sidebar .count.is-hidden {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.count.is-hidden::before {
+  content: "(";
+}
+
+.count.is-hidden::after {
+  content: ")";
+}
+
+.filters-count {
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-tokens {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One constraint, removable on its own: a firm control (not a pill: it is a command). */
+.filter-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 6px 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.filter-token-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-token .icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.filter-token:hover {
+  border-color: var(--accent);
+}
+
+.filter-token:hover .icon {
+  color: var(--accent);
+}
+
+.filters-clear {
+  margin-left: auto;
 }
 
 .new-pill {
@@ -1171,8 +1467,12 @@ kbd {
   background: var(--watch-wash);
 }
 
+/* A read hit keeps a lighter wash, so a later scan still finds the hits. */
+.item.is-watch.is-read {
+  background: color-mix(in srgb, var(--watch-wash) 50%, var(--surface));
+}
+
 /* In the Watchlist hits view every row is a hit: the wash would mark nothing, so the badge carries it. */
-.item.is-watch.is-read,
 .feed[data-showing="watchlist"] .item.is-watch {
   background: var(--surface);
 }
@@ -1197,7 +1497,7 @@ kbd {
 
 .item-title {
   margin: 0;
-  font-size: 16.5px;
+  font-size: 17.5px; /* 1.25× the 14px summary: the headline leads by size as well as weight */
   font-weight: 650;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -1275,7 +1575,8 @@ kbd {
   line-height: 18px;
 }
 
-.badge-new {
+.badge-new,
+.term-new {
   background: var(--new-soft);
   color: var(--new);
   text-transform: uppercase;
@@ -1298,10 +1599,21 @@ kbd {
 }
 
 .item-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; /* scan first: two lines, the full text is one click away at the source */
+  line-clamp: 2;
   margin: 0;
   color: var(--text-2);
-  font-size: 14.5px;
+  font-size: 14px;
   overflow-wrap: anywhere;
+}
+
+/* The row under the keyboard cursor reads in full. */
+.item:has(:focus-visible) .item-summary {
+  -webkit-line-clamp: unset;
+  line-clamp: none;
 }
 
 .item-summary.is-empty {
@@ -1337,7 +1649,7 @@ mark.hl-watch.hl-search {
 
 .filters-tip {
   flex-basis: 100%;
-  order: 3;
+  order: 4;
   color: var(--muted);
   font-size: 12.5px;
 }
@@ -1377,6 +1689,70 @@ mark.hl-watch.hl-search {
 
 .item.is-watch .item-btn:not([aria-pressed="true"]) {
   background: var(--surface);
+}
+
+/*
+ * With a mouse, actions that haven't been used rest quietly (a bare icon) and firm up when the
+ * row is hovered or focused; saved and read always show. Touch keeps the firm buttons.
+ */
+@media (hover: hover) {
+  .item .item-btn:not([aria-pressed="true"]) {
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted);
+  }
+
+  .item:is(:hover, :focus-within) .item-btn:not([aria-pressed="true"]) {
+    border-color: var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+  }
+
+  .item .item-btn:not([aria-pressed="true"]):hover {
+    border-color: color-mix(in srgb, var(--text-2) 45%, var(--border));
+    background: var(--surface-2);
+    color: var(--text);
+  }
+}
+
+/* ── Compact rows: headline and meta only, for a briefing scan or a second screen ── */
+.feed[data-density="compact"] .item {
+  align-items: center;
+  gap: 0 12px;
+  padding: 7px 12px 7px 16px;
+}
+
+.feed[data-density="compact"] .item-title {
+  font-size: 15.5px;
+  line-height: 1.3;
+}
+
+.feed[data-density="compact"] .item-meta {
+  margin: 2px 0 0;
+}
+
+.feed[data-density="compact"] .item-summary {
+  display: none;
+}
+
+.feed[data-density="compact"] .item:has(:focus-visible) .item-summary {
+  display: block;
+  margin-top: 4px;
+}
+
+.feed[data-density="compact"] .item-actions {
+  flex-direction: row;
+  gap: 4px;
+}
+
+.feed[data-density="compact"] .item-btn {
+  width: 30px;
+  height: 30px;
+}
+
+.feed[data-density="compact"] .item-btn .icon {
+  width: 16px;
+  height: 16px;
 }
 
 .btn-save[aria-pressed="true"] {
@@ -1419,7 +1795,7 @@ mark.hl-watch.hl-search {
 
 .empty-title {
   margin: 0 0 4px;
-  font-size: 16px;
+  font-size: 17.5px;
   font-weight: 650;
 }
 
@@ -1430,6 +1806,61 @@ mark.hl-watch.hl-search {
 
 .sentinel {
   height: 1px;
+}
+
+/*
+ * Half screens and second monitors (up to 1100px): the search keeps a usable width. The watch
+ * status takes its compact form ("1d", the tally only while a source fails) and "Mark N read"
+ * becomes an icon (its accessible name and tooltip still say the count).
+ */
+@media (max-width: 1100px) {
+  .watch-short {
+    display: inline;
+  }
+
+  .updated,
+  .watch-unit,
+  .topbar .mark-tail {
+    display: none;
+  }
+
+  .watch-btn:not(.has-failing) .watch-tally {
+    display: none;
+  }
+
+  .topbar {
+    gap: 8px;
+    padding: 0 16px;
+  }
+}
+
+/* Narrower still: the icon and the count ("✓✓ 12"); the full name stays in the tooltip. */
+@media (max-width: 1000px) {
+  .topbar .mark-word {
+    display: none;
+  }
+
+  .topbar .mark-all {
+    height: 38px;
+    padding: 0 10px;
+  }
+}
+
+/* Only the search gives way; every other top-bar control keeps its size. */
+.topbar > :not(.search) {
+  flex-shrink: 0;
+}
+
+@media (min-width: 601px) {
+  .search {
+    min-width: 220px;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 1000px) {
+  .search {
+    min-width: 200px;
+  }
 }
 
 /* ── Phones and small tablets ───────────────────────────────────────────── */
@@ -1547,12 +1978,61 @@ mark.hl-watch.hl-search {
     display: inline-flex;
   }
 
-  .topbar #theme-btn {
+  .topbar #theme-btn,
+  .topbar .density-btn {
     display: none;
   }
 
-  .theme-link {
+  .theme-link,
+  .density-link {
     display: inline;
+  }
+
+  /* Phones: the search keeps the room; the New view is one tap away in the drawer. */
+  .topbar .chip-new {
+    display: none;
+  }
+
+  /* Phones have no sidebar on screen: the idle bar says which view this is. */
+  .active-filters.is-idle {
+    display: flex;
+    gap: 8px;
+    padding: 5px 12px;
+    background: transparent;
+  }
+
+  .mark-all-section {
+    display: block;
+  }
+
+  /* Compact on a phone: the star alone, so a row is one tap target tall. Opening an item marks
+     it read, and "Mark these N read" closes out the list. */
+  .feed[data-density="compact"] .btn-read {
+    display: none;
+  }
+
+  /* One line: the STALE chip carries the alarm, this says how old the data is. */
+  .stale-banner {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0 2px;
+    padding: 7px 10px;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .stale-text {
+    display: none;
+  }
+
+  .stale-short {
+    display: block;
+  }
+
+  .stale-dismiss {
+    flex: none;
+    white-space: nowrap;
   }
 
   /* 16px or larger, so iOS doesn't zoom the page when a field takes focus. */
@@ -1566,24 +2046,38 @@ mark.hl-watch.hl-search {
   }
 
   .item-title {
-    font-size: 16px;
+    font-size: 17px;
   }
 
-  /* Phones: three lines of summary, so a glance covers more than two items. */
+  /* Phones: three short lines of summary, so a glance still covers more than two items. */
   .item-summary {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
     line-clamp: 3;
+  }
+
+  .feed[data-density="compact"] .item {
+    padding: 6px 8px 6px 13px;
+  }
+
+  .feed[data-density="compact"] .item-title {
+    font-size: 15.5px;
   }
 }
 
 /* Touch screens have no hover, so the "only" shortcut must always be visible (it is tappable). */
 @media (hover: none) {
-  /* Keyboard shortcuts mean nothing without a keyboard. */
-  #help-btn {
+  /* Keyboard shortcuts mean nothing without a keyboard: the dialog opens on the labels instead. */
+  #help-btn,
+  .keys-only,
+  .title-keys,
+  .keys-shortcuts,
+  .help-labels-heading {
     display: none;
+  }
+
+  .labels-link,
+  .title-touch {
+    display: inline;
   }
 
   .icon-btn,
@@ -1599,9 +2093,23 @@ mark.hl-watch.hl-search {
     padding: 4px 10px;
   }
 
-  .item-btn {
+  .item-btn,
+  .feed[data-density="compact"] .item-btn {
     width: 44px;
     height: 44px;
+  }
+
+  .feed[data-density="compact"] .item-actions {
+    gap: 2px;
+  }
+
+  .chip-filter,
+  .chip-upgrade {
+    min-height: 32px;
+  }
+
+  .filter-token {
+    min-height: 36px;
   }
 
   .chip-remove {

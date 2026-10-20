@@ -10,7 +10,8 @@ const PREFIX = 'owlfeed:v1:';
 const READ_TTL_DAYS = 30;
 const DAY = 86_400_000;
 
-export const DEFAULT_PREFS = Object.freeze({ view: 'all', hiddenCategories: [], hiddenSources: [] });
+export const DENSITIES = ['comfortable', 'compact'];
+export const DEFAULT_PREFS = Object.freeze({ view: 'all', hiddenCategories: [], hiddenSources: [], density: 'comfortable' });
 
 function defaultBackend() {
   try {
@@ -168,6 +169,7 @@ export function createStorage(backend = defaultBackend()) {
         view: typeof prefs.view === 'string' ? prefs.view : DEFAULT_PREFS.view,
         hiddenCategories: stringList(prefs.hiddenCategories),
         hiddenSources: stringList(prefs.hiddenSources),
+        density: DENSITIES.includes(prefs.density) ? prefs.density : DEFAULT_PREFS.density,
       };
     },
     setPrefs: (prefs) => save('prefs', prefs),
@@ -244,6 +246,7 @@ export function createStorage(backend = defaultBackend()) {
           view: typeof data.prefs.view === 'string' ? data.prefs.view : DEFAULT_PREFS.view,
           hiddenCategories: stringList(data.prefs.hiddenCategories),
           hiddenSources: stringList(data.prefs.hiddenSources),
+          density: DENSITIES.includes(data.prefs.density) ? data.prefs.density : DEFAULT_PREFS.density,
         });
       }
       return { terms: termsAdded, saved: savedAdded };

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="180" height="180">
+  <!--
+    Owlfeed's home-screen icon (source for site/apple-touch-icon.png).
+    The owl from site/favicon.svg, drawn full-bleed: iOS rounds the corners itself and turns any
+    transparency black, so the square is filled edge to edge and the owl sits inside the safe area.
+  -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#24459e"/>
+      <stop offset="1" stop-color="#172f73"/>
+    </linearGradient>
+  </defs>
+  <rect width="180" height="180" fill="url(#sky)"/>
+  <!-- The favicon's 64-unit owl, scaled 2.55× and centred (its body spans x 11–53, y 11–55). -->
+  <g transform="translate(8.4 7.4) scale(2.55)">
+    <path d="M14 20l8-9 6 7.5c2.6-.9 5.4-.9 8 0L42 11l8 9c3.5 9.5 2.6 19.5-3.3 27.4C42.8 52.6 37.6 55 32 55s-10.8-2.4-14.7-7.6C11.4 39.5 10.5 29.5 14 20z" fill="#e0e7ff"/>
+    <circle cx="24" cy="31" r="7.5" fill="#1e3a8a"/>
+    <circle cx="40" cy="31" r="7.5" fill="#1e3a8a"/>
+    <circle cx="24" cy="31" r="3.2" fill="#fbbf24"/>
+    <circle cx="40" cy="31" r="3.2" fill="#fbbf24"/>
+    <!-- Catchlights: at icon size the eyes need a glint to read as watching. -->
+    <circle cx="25.2" cy="29.7" r="0.95" fill="#ffffff" fill-opacity="0.9"/>
+    <circle cx="41.2" cy="29.7" r="0.95" fill="#ffffff" fill-opacity="0.9"/>
+    <path d="M29 39h6l-3 5.5z" fill="#f59e0b"/>
+  </g>
+</svg>

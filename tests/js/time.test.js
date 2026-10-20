@@ -36,6 +36,7 @@ test('dayLabel names today, yesterday and older days', () => {
   assert.equal(dayLabel(NOW - 86_400_000, NOW, 'en-US').title, 'Yesterday');
   const older = dayLabel(Date.parse('2026-10-12T09:00:00Z'), NOW, 'en-US');
   assert.equal(older.title, 'Monday');
-  assert.equal(older.detail, 'Mon, Oct 12');
+  assert.equal(older.detail, 'Oct 12'); // the title already names the weekday
+  assert.equal(dayLabel(NOW - 86_400_000, NOW, 'en-US').detail.split(',').length, 2); // Yesterday keeps it
   assert.match(dayLabel(Date.parse('2025-12-30T09:00:00Z'), NOW, 'en-US').detail, /2025/);
 });

@@ -62,7 +62,7 @@ export function matchesQuery(searchText, tokens) {
 
 /**
  * Apply view, category, source and search filters.
- * ctx: { view, hiddenCategories: Set, hiddenSources: Set, tokens, isRead(id), isNew(item), isSaved(id) }
+ * ctx: { view, hiddenCategories: Set, hiddenSources: Set, tokens, isRead(id), isNew(item), isSaved(id), watchTerm? }
  * Items need: id, source, category, searchText, watch (array of matched terms).
  */
 export function filterItems(items, ctx) {
@@ -81,6 +81,7 @@ export function filterItems(items, ctx) {
         break;
       case 'watchlist':
         if (!item.watch.length) return false;
+        if (ctx.watchTerm && !item.watch.includes(ctx.watchTerm)) return false; // one term's hits
         break;
       default:
         break;

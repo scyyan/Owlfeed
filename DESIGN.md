@@ -51,7 +51,7 @@ typography:
     letterSpacing: "0.2px"
   title:
     fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
-    fontSize: "16.5px"
+    fontSize: "17.5px"
     fontWeight: 650
     lineHeight: 1.35
   body:
@@ -61,7 +61,7 @@ typography:
     lineHeight: 1.5
   summary:
     fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
-    fontSize: "14.5px"
+    fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.5
   meta:
@@ -193,7 +193,7 @@ The mood is **precise**. Times line up in tabular figures, day headers stick in 
 item follows the same rhythm: headline, then source and time, then summary. Density is set for
 scanning. A briefing reader should cover a day's reporting in minutes, and a monitoring reader
 should spot a change at a glance. Expression lives in small, exact details (category dots,
-health dots, a 3px watchlist edge) rather than in decoration.
+health dots, a full-row watchlist wash) rather than in decoration.
 
 **Key Characteristics:**
 - A system font stack, so it renders natively, loads instantly and stays sharp everywhere.
@@ -277,12 +277,13 @@ of the hierarchy work (400, 550, 600, 650, 700). It reads as native, quick and e
 editorial.
 
 ### Hierarchy
-- **Headline** (700, 18px): the Owlfeed wordmark only.
-- **Title** (650, 16.5px, 1.35; 16px under 600px): item headlines. A headline that has been read
+- **Headline** (700, 18px): the Owlfeed wordmark only. Dialog and empty-state titles use Title.
+- **Title** (650, 17.5px, 1.35; 17px under 600px; 15.5px in compact rows): item headlines, 1.25×
+  the summary so the headline leads by size as well as weight. A headline that has been read
   or visited drops to 550 and Slate Muted.
 - **Body** (400, 15px, 1.5): the base for UI text, empty states and sidebar rows (13.5px).
-- **Summary** (400, 14.5px, 1.5, Ink Soft): the source's summary under each headline. The 880px
-  content column keeps lines to roughly 85–95 characters.
+- **Summary** (400, 14px, 1.5, Ink Soft): the source's summary under each headline, clamped to
+  two lines (three on phones) and shown in full on the row under the keyboard cursor.
 - **Meta** (400–600, 12.5px, tabular numbers): source, time, relative age and badges. Counts are
   12px with tabular numbers.
 - **Day label** (700, 13px, 0.4px tracking, uppercase): "TODAY", "YESTERDAY", followed by the
@@ -314,6 +315,9 @@ The spacing scale is a 4px grid used tightly: 4, 6, 8, 12, 16 and 24px, plus 14p
 padding. Sidebar rows are compact (4–8px vertical padding), and items breathe more (14px).
 
 **Responsive:**
+- **≤1100px:** the watch status takes its compact form (as on phones), "Mark N read" shortens to
+  "Mark N", and the top bar tightens to 16px padding and 8px gaps. **≤1000px:** "Mark N" becomes a
+  38px icon. Only the search shrinks (never below 220px, 200px under 1000px).
 - **≤900px:** the sidebar becomes an off-canvas drawer, min(88vw, 330px) wide. It slides in over
   a 40% black scrim and is inert and modal while open. A menu button appears in the top bar, and
   the content padding drops to 16px.
@@ -321,7 +325,8 @@ padding. Sidebar rows are compact (4–8px vertical padding), and items breathe 
   source is failing), the theme toggle moves into the drawer as a text link, inputs are 16px (so
   iOS never zooms on focus), "Mark N read" moves into
   the drawer, the search placeholder shortens to "Search", item padding tightens to 12px/10px,
-  titles drop to 16px, and summaries clamp to three lines.
+  titles drop to 17px, summaries clamp to three lines, compact-row actions stack, and an idle
+  bar above the timeline names the current view ("328 items · All items").
 - **Drawer footer on touch:** settings links become a two-column grid of 44px bordered targets,
   and "Shortcuts" is hidden (it only helps with a keyboard).
 - **Touch (`hover: none`):** controls that only appear on hover, such as the source "only"
@@ -438,6 +443,68 @@ and the search underline is dropped: two highlight styles never stack. Search an
 share one matching rule (whole words; a trailing * matches longer words), so what is highlighted
 is exactly what matched.
 
+**Density.** Comfortable (headline, meta, two-line summary) is the default. Compact (toggle in the
+top bar, "Compact rows" in the phone drawer, or `d`) shows headline and meta only, 7px row padding
+and the actions side by side at 30px (44px on touch); the focused row reveals its summary. The
+choice is saved with the reader's preferences.
+
+**Quiet actions.** With a mouse, save and read buttons that haven't been used rest as bare Slate
+Muted icons and firm up (Paper, hairline) when the row is hovered or focused. Saved and read
+always show their tint. Touch keeps the firm 44px buttons.
+
+**Watchlist chips are filters.** The chip body is a toggle with a tabular hit count: pressed, the
+Watchlist hits view shows that term alone (2px Owl's-Eye Amber outline, filled count). A term with
+no hits keeps a muted count. A read hit keeps half the Owl's-Eye Wash.
+
+**Filter tokens.** The active-filters bar shows the item count and one token per constraint (view,
+term, categories, sources, search): a 6px-radius Paper control with an ×, removable on its own.
+"Clear all" appears once there are two or more. A search-only empty state offers "Clear search";
+when one filter hides every match, the empty state names it ("4 matches are hidden by the category
+filter") and offers to lift just that one.
+
+**Counts follow the search.** View, category, source and watchlist-chip counts all count matches
+for the current search, so the sidebar and timeline never disagree. While a search is active the
+sidebar counts turn Night Sky Blue at 650 weight.
+
+**Briefing views (New, Unread).** A one-line summary leads ("129 new · 12 watchlist hits · Cyber
+80 · Geopolitics 49", tabular, Ink Soft with Ink numbers). The newest five watchlist hits come first in
+their own section, headed "WATCHLIST HITS · Newest 5 of 38" in Owl's-Eye Amber (the rows drop the
+wash there, as in the hits view), with "Show all 38 hits here" below them; the other hits stay in
+the timeline in time order. The list ends with a hairline and a finish line. With unread items
+left it reads "End of the list · 327 unread items" and offers "Mark these 327 read" (Undo in the
+toast); only with nothing unread does it say "You're caught up to 9:58 PM". While stale it says
+why. The summary and finish line update in place as items are read. NEW badges are hidden in the
+New view, where every row is new. All items, Saved and Watchlist hits keep strict time order.
+
+**Summary counts are filters.** The briefing summary is a list (screen readers hear each part),
+with "·" separators drawn in CSS. "31 watchlist hits" opens the Watchlist hits view; a category
+count ("158 Cyber") shows that category alone within the briefing. The view's own count is plain.
+
+**Watchlist upgrades.** When a whole-word term's prefix form would catch more ("Zelensky" misses
+"Zelenskyy"), its chip adds a dashed amber offer, "+3 as Zelensky*". One tap replaces the term in
+place and keeps focus on the new chip.
+
+**Density and Mark read icons.** The density toggle draws two rules with arrows closing between
+them (never three or four bars, which read as the menu). At 1000px and below, "Mark N read" keeps
+its count beside the double check ("✓✓ 328"). On phones in compact mode only the star shows: rows
+stay one tap target tall, opening an item marks it read, and "Mark these N read" closes out a list.
+
+**Help on touch screens.** The drawer's "What the labels mean" opens the help dialog, which on
+touch drops the keyboard shortcuts and leads with the label glossary and search rules.
+
+**Search variants.** When the prefix form of a search finds more ("Zelensky" → "Zelensky*"), the
+filter bar offers it: "+3 more as Zelensky*". In briefing views the filter bar drops its own count
+(the summary line carries it), and the "N new" chip counts with the search. Phones hide the chip so
+the search keeps its width.
+
+**Hidden categories** show what showing them would add, muted and in brackets ("(170)"), never a
+bare 0. Day headers name the weekday once ("FRIDAY Oct 16"; Today and Yesterday keep "Sat, Oct 17").
+A second skip link, "Skip to search", sits beside "Skip to timeline".
+
+**"New" vocabulary.** NEW means arrived since the last visit; on a first visit, published in the
+last 24 hours. Items landing while the page is open are "just arrived" (the pill). The help
+dialog spells out New, Unread and Just arrived.
+
 ### Freshness Signals (signature)
 - **Watch status:** the top bar's anchor at every width. A 38px Paper button with the owl's eyes,
   "Updated 9 min ago" and a "31/31 sources" tally after a hairline divider. Fresh (≤30 min): eyes
@@ -449,7 +516,7 @@ is exactly what matched.
   spelled out there, never only in a tooltip.
 - **Blink:** the eyes blink once (0.42s, expo ease-out) when a new build is applied. It is the
   system's one authored motion, and it is removed under reduced motion.
-- **Stale banner:** an Alarm Rust outlined box with a 10px radius above the timeline, written for
+- **Stale banner** (one short line on phones: "Last update 1 day ago. Newer reports may be missing."): an Alarm Rust outlined box with a 10px radius above the timeline, written for
   readers ("last updated 3 hours ago (9:58 PM). Newer reporting may be missing."), with a "Hide
   for now" link that hides it for that build for the rest of the session. The chip keeps saying
   STALE. Fixes for the site owner (the Refresh feed workflow, linked on GitHub Pages) appear only
