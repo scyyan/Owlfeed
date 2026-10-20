@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import timezone, tzinfo
+from datetime import timedelta, timezone, tzinfo
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
+# How far in the future a date may be (clock skew) before it is treated as wrong.
+FUTURE_TOLERANCE = timedelta(minutes=10)
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 SUMMARY_MODES = ("auto", "description", "content")
+SOURCE_KEYS = frozenset(
+    {"id", "name", "feed", "site", "category", "group", "enabled", "summary_from", "exclude_title", "timezone"}
+)
 # Used when sources.yml has no settings.categories: category -> its sidebar groups.
 DEFAULT_CATEGORIES = {
     "Cyber": ("Government & CERT", "Threat research", "Security news"),
@@ -102,6 +107,9 @@ def _parse_source(raw: object, index: int, categories: dict[str, tuple[str, ...]
         raise ConfigError(f"{where} must be a mapping")
     source_id = _text_field(raw, "id", where)
     where = f"source '{source_id}'"
+    unknown = sorted(str(key) for key in set(raw) - SOURCE_KEYS)
+    if unknown:
+        raise ConfigError(f"{where}: unknown option(s) {', '.join(unknown)}")
     if not ID_PATTERN.match(source_id):
         raise ConfigError(f"{where}: id must be lowercase letters, digits and dashes")
     for key in ("feed", "site"):

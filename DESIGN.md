@@ -328,8 +328,8 @@ padding. Sidebar rows are compact (4–8px vertical padding), and items breathe 
   iOS never zooms on focus), "Mark N read" moves into
   the drawer, the search placeholder shortens to "Search", item padding tightens to 12px/10px,
   titles drop to 17px, and summaries clamp to three lines. Headlines and summaries run the full
-  row width; save and read sit side by side at the end of the meta line. Rows start compact
-  until the reader picks a density. A **tab bar** fixed to the bottom (All, New, Hits, Saved with
+  row width; save and read sit side by side at the end of the meta line. Rows start comfortable,
+  as on wider screens, until the reader picks a density. A **tab bar** fixed to the bottom (All, New, Hits, Saved with
   their counts, plus Filters, which opens the drawer) replaces the top-left menu button, keeps
   the main views within thumb reach, and names the current view, so the idle bar is hidden.
 - **Drawer footer on touch:** settings links become a two-column grid of 44px bordered targets,

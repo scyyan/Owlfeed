@@ -3,12 +3,13 @@
 import { filterItems, fold, matchesQuery, parseQuery, prefixSuggestion, sortItems, VIEWS } from './filters.js';
 import * as ui from './render.js';
 import { createStorage, DENSITIES } from './storage.js';
-import { clockTime, dayKey, parseTime, updatedLabel } from './time.js';
+import { clockTime, DAY, dayKey, HOUR, MINUTE, parseTime, updatedLabel } from './time.js';
 import { addTerm, buildMatcher, normalizeTerm, removeTerm } from './watchlist.js';
 
 const FEED_URL = 'data/feed.json';
 const POLL_MS = 5 * 60_000;
 const TICK_MS = 30_000;
+const RETRY_MS = 60_000; // after a failed load
 const STALE_MS = 60 * 60_000;
 // The feed refreshes every 15 minutes; past this it is running late (but not yet stale).
 const AGING_MS = 30 * 60_000;
@@ -43,6 +44,7 @@ const state = {
   showAllHits: false, // briefing views: all watchlist hits pinned, not just the newest few
   widened: null, // { from: 'ransom', to: 'ransom*' } when a whole-word search found nothing and its prefix form did
   exactQuery: null, // a query the reader asked to keep whole-word, even with no results
+  suggestion: null, // the prefix form ("ransom*") offered by the current empty state or filter bar
   upgradesOpen: false, // the watchlist's "could catch more" list is expanded
   seenGeneratedAt: null, // generated_at of the newest build shown while the page was visible
   hiddenAt: null,
@@ -250,7 +252,7 @@ async function loadInitial() {
     $('watch-short').textContent = firstRun ? '—' : offline ? 'Offline' : 'Failed';
     $('watch-btn').dataset.state = 'stale';
     $('watch-btn').setAttribute('aria-label', `Feed status: ${$('updated').textContent.toLowerCase()}`);
-    state.retryTimer = setTimeout(loadInitial, 60_000);
+    state.retryTimer = setTimeout(loadInitial, RETRY_MS);
   }
 }
 
@@ -381,7 +383,7 @@ function renderFeed() {
   const list = visibleItems();
   $('feed').dataset.showing = state.prefs.view;
   renderActiveFilters(list.length);
-  updateMarkAll();
+  updateMarkAll(list);
   if (!list.length) {
     feedRenderer.render([], renderContext());
     const empty = emptyStateFor();
@@ -407,7 +409,7 @@ function renderFeed() {
       pinnedDetail: pinnedDetail(hits.length),
       pinnedFooter: hits.length > PINNED_LIMIT ? pinnedToggle(hits.length) : null,
       lead: briefingSummary(list, hits),
-      end: caughtUpNote(),
+      end: caughtUpNote(list),
     });
   } else {
     feedRenderer.render(list, renderContext());
@@ -474,6 +476,22 @@ function briefingSummary(list, pinned) {
   return box;
 }
 
+// Whether an item matches a prefix variant ("ransom*") depends only on its text, so the answer is
+// kept per item. Items are rebuilt when new data arrives, which drops the cache with them.
+const variantHits = new WeakMap(); // item -> Map(variant -> matched?)
+const variantMatchers = new Map(); // variant -> matcher
+
+function matchesVariant(item, variant) {
+  let byVariant = variantHits.get(item);
+  if (!byVariant) variantHits.set(item, (byVariant = new Map()));
+  if (!byVariant.has(variant)) {
+    let matcher = variantMatchers.get(variant);
+    if (!matcher) variantMatchers.set(variant, (matcher = buildMatcher([variant])));
+    byVariant.set(variant, matcher.match(item.title, item.summary).length > 0);
+  }
+  return byVariant.get(variant);
+}
+
 /**
  * Whole-word terms can miss spellings ("Zelensky" vs "Zelenskyy"). For each term whose prefix
  * form would catch more, the watchlist offers the upgrade: { variant, extra }.
@@ -484,8 +502,7 @@ function termUpgrades(termCounts, pool) {
     if (term.endsWith('*') || term.replace(/\s+/g, '').length < 3) continue;
     const variant = `${term}*`;
     if (state.terms.some((t) => t.toLowerCase() === variant.toLowerCase())) continue;
-    const matcher = buildMatcher([variant]);
-    const total = pool.filter((item) => matcher.match(item.title, item.summary).length).length;
+    const total = pool.filter((item) => matchesVariant(item, variant)).length;
     const extra = total - (termCounts.get(term) ?? 0);
     if (extra > 0) upgrades.set(term, { variant, extra });
   }
@@ -497,11 +514,11 @@ function termUpgrades(termCounts, pool) {
  * ends with the one action that closes it out (scoped, with Undo). Never an all-clear the data
  * can't back: while stale it says so.
  */
-function caughtUpNote() {
+function caughtUpNote(list = visibleItems()) {
   const fresh = freshness();
   if (!fresh) return null;
   const time = clockTime(fresh.generated);
-  const unread = unreadVisibleIds().length;
+  const unread = unreadVisibleIds(list).length;
   const note = ui.el('div', 'caught-up');
   note.setAttribute('role', 'note');
   let title;
@@ -522,17 +539,17 @@ function caughtUpNote() {
 }
 
 /** Keep the briefing's summary and finish line true after reads, without re-rendering the list. */
-function refreshBriefing() {
+function refreshBriefing(list) {
   if (!state.data || !BRIEFING_VIEWS.has(state.prefs.view)) return;
   const feed = $('feed');
   const lead = feed.querySelector('.briefing');
   const end = feed.querySelector('.caught-up');
   if (!lead && !end) return;
-  const list = visibleItems();
+  list ??= visibleItems();
   if (lead) lead.replaceWith(briefingSummary(list, list.filter((item) => item.watch.length)));
   if (end) {
     const hadFocus = end.contains(document.activeElement);
-    const next = caughtUpNote();
+    const next = caughtUpNote(list);
     end.replaceWith(next);
     if (hadFocus) (next.querySelector('button') ?? next).focus?.({ preventScroll: true });
   }
@@ -772,12 +789,7 @@ function clearFilter(id, event) {
   } else if (id === 'term') state.watchTerm = null;
   else if (id === 'categories') state.prefs.hiddenCategories = [];
   else if (id === 'sources') state.prefs.hiddenSources = [];
-  else if (id === 'search') {
-    state.query = '';
-    state.tokens = [];
-    state.widened = null;
-    $('search').value = '';
-  }
+  else if (id === 'search') clearSearchState();
   filtersChanged();
   // Focus moves to the token that took this one's place, or (none left) where Clear would go.
   const remaining = [...$('active-filters').querySelectorAll('[data-clear-filter]')];
@@ -810,10 +822,10 @@ function freshness(now = Date.now()) {
 
 /** "now", "9m", "3h", "2d": the phone-width freshness label. */
 function shortAge(ms) {
-  if (ms < 60_000) return 'now';
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h`;
-  return `${Math.floor(ms / 86_400_000)}d`;
+  if (ms < MINUTE) return 'now';
+  if (ms < HOUR) return `${Math.floor(ms / MINUTE)}m`;
+  if (ms < DAY) return `${Math.floor(ms / HOUR)}h`;
+  return `${Math.floor(ms / DAY)}d`;
 }
 
 /** The top bar's watch status: owl eyes, freshness and source health, at every screen size. */
@@ -1056,15 +1068,20 @@ function filtersChanged() {
   scrollToFeedTop();
 }
 
+/** Empty the search box and everything derived from it. */
+function clearSearchState() {
+  $('search').value = '';
+  state.query = '';
+  state.tokens = [];
+  state.widened = null;
+}
+
 function resetFilters(event) {
   state.prefs.hiddenCategories = [];
   state.prefs.hiddenSources = [];
   state.prefs.view = 'all';
   state.watchTerm = null;
-  state.query = '';
-  state.tokens = [];
-  state.widened = null;
-  $('search').value = '';
+  clearSearchState();
   filtersChanged();
   // The Clear button that had focus is gone. From the keyboard, continue in the search box; after a
   // tap or click, go to the newest item instead, so no on-screen keyboard pops up over the feed.
@@ -1121,8 +1138,8 @@ function toggleSaved(id) {
 }
 
 /** Only the unread items count: marking already-read items is a no-op, and undo must not unread them. */
-function unreadVisibleIds() {
-  return visibleItems()
+function unreadVisibleIds(list = visibleItems()) {
+  return list
     .map((item) => item.id)
     .filter((id) => !storage.isRead(id));
 }
@@ -1157,8 +1174,8 @@ function markAllRead() {
 }
 
 /** "Mark 12 read": the scope is part of the label, and the control is off when nothing is unread. */
-function updateMarkAll() {
-  const count = state.data ? unreadVisibleIds().length : 0;
+function updateMarkAll(list = state.data ? visibleItems() : []) {
+  const count = unreadVisibleIds(list).length;
   for (const button of document.querySelectorAll('[data-mark-all]')) {
     button.disabled = count === 0;
     // "Nothing to mark", not "All read": an empty search or view has nothing unread *shown*,
@@ -1173,7 +1190,7 @@ function updateMarkAll() {
     button.setAttribute('aria-label', label);
     button.title = label;
   }
-  refreshBriefing();
+  refreshBriefing(list);
 }
 
 /** Tell screen readers without showing the toast (for results that are already visible on screen). */
@@ -1261,11 +1278,10 @@ function toggleTheme() {
 }
 
 // ── Density ─────────────────────────────────────────────────────────────────
-// Until the reader picks a density, phones start compact (more headlines per screen) and wider
-// screens start comfortable.
+// Until the reader picks a density, every screen (phones included) starts comfortable.
 function applyDefaultDensity() {
   if (DENSITIES.includes(state.prefs.density)) return;
-  state.prefs.density = window.matchMedia('(max-width: 600px)').matches ? 'compact' : 'comfortable';
+  state.prefs.density = 'comfortable';
 }
 
 // Comfortable (headline, meta, two-line summary) is the default; compact is headlines and meta
@@ -1648,7 +1664,7 @@ function wireEvents() {
   $('status-action').addEventListener('click', runToastAction);
   $('stale-dismiss').addEventListener('click', hideStaleBanner);
   // Hovering or focusing the toast holds it open; leaving restarts a short countdown.
-  for (const [type, ms] of [['pointerenter', null], ['focusin', null], ['pointerleave', 4000], ['focusout', 4000]]) {
+  for (const [type, ms] of [['pointerenter', null], ['focusin', null], ['pointerleave', TOAST_MS], ['focusout', TOAST_MS]]) {
     $('status').addEventListener(type, () => {
       if (ms === null) clearTimeout(announceTimer);
       else if (!$('status').hidden) scheduleToastHide(ms);
@@ -1717,10 +1733,7 @@ function wireEvents() {
         $('watch-btn').focus();
       } else if (document.body.classList.contains('drawer-open')) closeDrawer();
       else if (event.target === $('search') && $('search').value) {
-        $('search').value = '';
-        state.query = '';
-        state.tokens = [];
-        state.widened = null;
+        clearSearchState();
         renderSidebar(); // counts follow the search
         renderFeed();
         scrollToFeedTop();

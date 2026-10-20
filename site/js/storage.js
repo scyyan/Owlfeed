@@ -169,7 +169,7 @@ export function createStorage(backend = defaultBackend()) {
         view: typeof prefs.view === 'string' ? prefs.view : DEFAULT_PREFS.view,
         hiddenCategories: stringList(prefs.hiddenCategories),
         hiddenSources: stringList(prefs.hiddenSources),
-        // No stored choice yet: the app picks a default for the screen (compact on phones).
+        // No stored choice yet: the app picks the default (comfortable).
         density: DENSITIES.includes(prefs.density) ? prefs.density : null,
       };
     },

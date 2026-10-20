@@ -182,8 +182,9 @@ def cmd_check(args: argparse.Namespace) -> int:
     print(f"Owlfeed feed check at {iso(now)}: {len(rows)} sources\n")
     for row in rows:
         entries = row.entries or []
-        label = "OK  " if not row.error and entries else ("FAIL" if row.error else "EMPTY")
-        if label != "OK  " and row.source.enabled:
+        row_ok = not row.error and bool(entries)
+        label = "OK  " if row_ok else ("FAIL" if row.error else "EMPTY")
+        if not row_ok and row.source.enabled:
             failures += 1
             warnings.append(f"{row.source.name} ({row.source.id}): {row.error or 'feed has no items'}")
         flag = "" if row.source.enabled else " [disabled]"

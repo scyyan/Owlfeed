@@ -1,8 +1,8 @@
 // Time helpers. Everything is shown in the viewer's own time zone and locale.
 
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
+export const MINUTE = 60_000;
+export const HOUR = 60 * MINUTE;
+export const DAY = 24 * HOUR;
 
 export function parseTime(value) {
   const ms = Date.parse(value);

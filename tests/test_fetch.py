@@ -21,10 +21,12 @@ class FakeRaw:
 
 
 class FakeResponse:
-    def __init__(self, status=200, body=b"<rss/>", headers=None, on_read=None):
+    def __init__(self, status=200, body=b"<rss/>", headers=None, on_read=None, url="https://a.example/feed", history=()):
         self.status_code = status
         self.headers = headers or {}
         self.raw = FakeRaw(body, on_read)
+        self.url = url
+        self.history = list(history)
 
     def __enter__(self):
         return self
@@ -65,6 +67,19 @@ def test_conditional_get_and_not_modified():
     assert result.not_modified and result.etag == '"v1"' and result.error is None
     headers = get.calls[0][1]["headers"]
     assert headers["If-None-Match"] == '"v1"' and headers["If-Modified-Since"] == "Wed"
+
+
+def test_redirects_that_stay_on_https_are_followed():
+    get = Recorder(FakeResponse(200, b"<rss/>", url="https://b.example/feed", history=[FakeResponse(301)]))
+    result = fetch("https://a.example/feed", get=get, sleep=no_sleep)
+    assert result.error is None and result.content == b"<rss/>"
+
+
+def test_redirects_to_plain_http_are_refused():
+    get = Recorder(FakeResponse(200, b"<rss>evil</rss>", url="http://a.example/feed", history=[FakeResponse(301)]))
+    result = fetch("https://a.example/feed", get=get, sleep=no_sleep)
+    assert result.error == "redirected to a non-https URL" and result.content is None
+    assert len(get.calls) == 1
 
 
 def test_client_errors_are_not_retried():

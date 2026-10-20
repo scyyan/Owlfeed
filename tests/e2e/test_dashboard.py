@@ -1086,12 +1086,12 @@ def test_a_match_past_the_visible_lines_is_shown_as_a_snippet(page, server):
     expect(summary.locator("mark.hl-search")).to_have_text("certificates")
 
 
-def test_phone_tab_bar_switches_views_and_rows_start_compact(make_page, server):
+def test_phone_tab_bar_switches_views_and_rows_start_comfortable(make_page, server):
     page = make_page(viewport=(390, 844))
     page.clock.set_fixed_time(NOW)
     open_dashboard(page, server)
-    # No density chosen yet: a phone starts compact, with the headline across the full width.
-    expect(page.locator("#feed")).to_have_attribute("data-density", "compact")
+    # No density chosen yet: a phone starts comfortable, like wider screens.
+    expect(page.locator("#feed")).to_have_attribute("data-density", "comfortable")
     tabbar = page.locator("#tabbar")
     expect(tabbar).to_be_visible()
     expect(page.locator("#menu-btn")).to_be_hidden()
