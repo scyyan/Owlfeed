@@ -75,7 +75,7 @@
         <div class="side-actions">
           <button class="link-btn" id="export-btn" type="button">Back up settings</button>
           <button class="link-btn" id="import-btn" type="button">Restore</button>
-          <button class="link-btn" id="help-btn" type="button" aria-haspopup="dialog">Shortcuts</button>
+          <button class="link-btn" id="help-btn" type="button" aria-haspopup="dialog">Shortcuts &amp; labels</button>
           <button class="link-btn labels-link" id="labels-btn" type="button" aria-haspopup="dialog">What the labels mean</button>
           <button class="link-btn theme-link" id="theme-btn-drawer" type="button" data-theme-toggle>Dark mode</button>
           <button class="link-btn density-link" id="density-btn-drawer" type="button" aria-pressed="false" data-density-toggle>Compact rows</button>
@@ -151,8 +151,8 @@
       <nav class="tabbar" id="tabbar" aria-label="Views">
         <button class="tab" type="button" data-tab="all"><span class="tab-label">All</span><span class="count"></span></button>
         <button class="tab" type="button" data-tab="new"><span class="tab-label">New</span><span class="count"></span></button>
-        <button class="tab" type="button" data-tab="watchlist"><span class="tab-label">Hits</span><span class="count"></span></button>
-        <button class="tab" type="button" data-tab="saved"><span class="tab-label">Saved</span><span class="count"></span></button>
+        <button class="tab" type="button" data-tab="unread"><span class="tab-label">Unread</span><span class="count"></span></button>
+        <button class="tab" type="button" data-tab="watchlist"><span class="tab-label">Watchlist</span><span class="count"></span></button>
         <button class="tab tab-filters" id="tab-filters" type="button" aria-label="Open views and filters" aria-controls="sidebar" aria-expanded="false">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
           <span class="tab-label">Filters</span>
@@ -184,7 +184,7 @@
     <h3 class="help-subtitle help-labels-heading">What the labels mean</h3>
     <dl class="keys terms">
       <dt><span class="badge term-new">New</span></dt><dd>Arrived since your last visit. On your first visit: the 24 hours before the latest update. The <em>New since last visit</em> view lists exactly these.</dd>
-      <dt><span class="glyph-unread" aria-hidden="true"></span>Unread</dt><dd>Not opened or marked read yet, however old. A blue dot sits beside the headline.</dd>
+      <dt><span class="glyph-unread" aria-hidden="true"></span>Unread</dt><dd>Not opened or marked read yet, however old. A dot beside the headline marks older unread items; the green <em>New</em> badge marks the rest.</dd>
       <dt><span class="glyph glyph-read" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 4.25a7.75 7.75 0 1 0 0 15.5 7.75 7.75 0 0 0 0-15.5z"/><path d="M8.4 12.3l2.5 2.5 4.8-5.1"/></svg></span> Read</dt><dd>The dot goes, the headline fades and the ring fills with a check. Opening an item marks it read.</dd>
       <dt><span class="glyph glyph-saved" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6L12 16.6l-5 2.6.9-5.6-4-3.9 5.6-.8z"/></svg></span> Saved</dt><dd>Starred items stay in Saved, even after they leave the 7-day feed.</dd>
       <dt><span class="badge badge-watch term-watch"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12zM12 9.25a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5z"/></svg>term</span></dt><dd>An amber row with this badge mentions one of your watchlist terms.</dd>

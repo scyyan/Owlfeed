@@ -38,6 +38,19 @@ export function clockTime(ms, locale) {
   return new Date(ms).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
 }
 
+/**
+ * A clock time with enough of the day to be unambiguous: "9:58 PM" today, "yesterday 9:58 PM",
+ * "Fri 9:58 PM" within the past week, and "Oct 14, 9:58 PM" beyond that.
+ */
+export function momentLabel(ms, now = Date.now(), locale) {
+  const days = Math.round((startOfDay(now) - startOfDay(ms)) / DAY);
+  const clock = clockTime(ms, locale);
+  if (days <= 0) return clock;
+  if (days === 1) return `yesterday ${clock}`;
+  if (days < 7) return `${new Date(ms).toLocaleDateString(locale, { weekday: 'short' })} ${clock}`;
+  return `${new Date(ms).toLocaleDateString(locale, { month: 'short', day: 'numeric' })}, ${clock}`;
+}
+
 export function fullTime(ms, locale) {
   return new Date(ms).toLocaleString(locale, {
     weekday: 'short',

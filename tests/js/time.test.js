@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { dayKey, dayLabel, parseTime, relativeTime, updatedLabel } from '../../site/js/time.js';
+import { dayKey, dayLabel, momentLabel, parseTime, relativeTime, updatedLabel } from '../../site/js/time.js';
 
 const NOW = Date.parse('2026-10-15T14:00:00Z'); // tests run with TZ=UTC
 
@@ -39,4 +39,11 @@ test('dayLabel names today, yesterday and older days', () => {
   assert.equal(older.detail, 'Oct 12'); // the title already names the weekday
   assert.equal(dayLabel(NOW - 86_400_000, NOW, 'en-US').detail.split(',').length, 2); // Yesterday keeps it
   assert.match(dayLabel(Date.parse('2025-12-30T09:00:00Z'), NOW, 'en-US').detail, /2025/);
+});
+
+test('momentLabel names the day once a bare clock time would be ambiguous', () => {
+  assert.equal(momentLabel(NOW - 3 * 3_600_000, NOW, 'en-US'), '11:00 AM');
+  assert.equal(momentLabel(NOW - 20 * 3_600_000, NOW, 'en-US'), 'yesterday 6:00 PM');
+  assert.equal(momentLabel(NOW - 3 * 86_400_000, NOW, 'en-US'), 'Mon 2:00 PM');
+  assert.equal(momentLabel(NOW - 10 * 86_400_000, NOW, 'en-US'), 'Oct 5, 2:00 PM');
 });

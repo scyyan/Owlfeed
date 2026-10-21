@@ -3,7 +3,7 @@
 import { filterItems, fold, matchesQuery, parseQuery, prefixSuggestion, sortItems, VIEWS } from './filters.js';
 import * as ui from './render.js';
 import { createStorage, DENSITIES } from './storage.js';
-import { clockTime, DAY, dayKey, HOUR, MINUTE, parseTime, updatedLabel } from './time.js';
+import { clockTime, DAY, dayKey, HOUR, MINUTE, momentLabel, parseTime, updatedLabel } from './time.js';
 import { addTerm, buildMatcher, normalizeTerm, removeTerm } from './watchlist.js';
 
 const FEED_URL = 'data/feed.json';
@@ -456,7 +456,7 @@ function briefingSummary(list, pinned) {
   const fresh = freshness();
   if (fresh?.stale) {
     // The stale banner folds in here for briefings: one line, before the counts it qualifies.
-    const li = ui.el('li', 'briefing-part briefing-stale', `Stale: last update ${clockTime(fresh.generated)}, ${updatedLabel(fresh.generated)}`);
+    const li = ui.el('li', 'briefing-part briefing-stale', `Stale: last update ${momentLabel(fresh.generated)}, ${updatedLabel(fresh.generated)}`);
     parts.push(li);
   }
   const first = part(list.length, state.prefs.view === 'new' ? 'new' : 'unread');
@@ -517,7 +517,7 @@ function termUpgrades(termCounts, pool) {
 function caughtUpNote(list = visibleItems()) {
   const fresh = freshness();
   if (!fresh) return null;
-  const time = clockTime(fresh.generated);
+  const time = momentLabel(fresh.generated);
   const unread = unreadVisibleIds(list).length;
   const note = ui.el('div', 'caught-up');
   note.setAttribute('role', 'note');
@@ -595,6 +595,16 @@ function emptyStateFor() {
         { id: `lift-${lift.id}`, label: lift.label },
       );
     }
+    // The view itself can be what is narrowing the search (Watchlist hits, Unread, Saved, New): when
+    // the same search finds items in All items, say that instead of blaming the spelling.
+    const inAll = query && view !== 'all' ? filterItems(itemsForView('all'), filterContext('all')).length : 0;
+    if (inAll) {
+      return ui.emptyState(
+        `Nothing in ${VIEW_LABELS[view]} matches ${query.includes('"') ? query : `“${query}”`}`,
+        `${plural(inAll, 'item')} ${inAll === 1 ? 'matches' : 'match'} in All items.`,
+        { id: 'search-all', label: 'Search all items' },
+      );
+    }
     return query
       ? ui.emptyState(
           `Nothing matches ${query.includes('"') ? query : `“${query}”`}`,
@@ -609,16 +619,17 @@ function emptyStateFor() {
       const since = baselineLabel();
       const unread = filterItems(state.items, filterContext('unread', [])).length;
       const waiting = unread ? ` ${plural(unread, 'unread item')} from earlier ${unread === 1 ? 'is' : 'are'} still waiting.` : '';
-      const goUnread = unread ? { id: 'unread', label: 'Go to Unread' } : undefined;
       const fresh = freshness();
       if (fresh?.stale) {
         // "Nothing new" can't be confirmed when nothing has been fetched: never show it as an all-clear.
+        // The reader's best move is to read what is here, newest first, so that is the button.
         return ui.emptyState(
-          `No refresh since ${clockTime(fresh.generated)}`,
-          `Newer reporting may be missing, so this view can’t confirm there’s nothing new.${waiting}`,
-          goUnread,
+          `No refresh since ${momentLabel(fresh.generated)}`,
+          `That was ${updatedLabel(fresh.generated)}. Newer reporting may be missing, so this view can’t confirm there’s nothing new.${waiting}`,
+          unread ? { id: 'unread', label: 'Show Unread, newest first' } : undefined,
         );
       }
+      const goUnread = unread ? { id: 'unread', label: 'Go to Unread' } : undefined;
       const title = `Nothing new ${newScope()}`;
       return unread
         ? ui.emptyState(title, waiting.trim(), goUnread)
@@ -664,6 +675,7 @@ function liftingFilter(view) {
   return null;
 }
 
+const PHONE_TAB_VIEWS = new Set(['all', 'new', 'unread', 'watchlist']); // the views with a tab in the phone's bottom bar
 const VIEW_LABELS = { all: 'All items', new: 'New since last visit', unread: 'Unread', saved: 'Saved', watchlist: 'Watchlist hits' };
 
 /**
@@ -674,7 +686,9 @@ const VIEW_LABELS = { all: 'All items', new: 'New since last visit', unread: 'Un
 function activeFilterParts() {
   const parts = [];
   // Briefing views name themselves in their summary line (and the sidebar), so no view token there.
-  if (state.prefs.view !== 'all' && !BRIEFING_VIEWS.has(state.prefs.view)) parts.push({ id: 'view', label: VIEW_LABELS[state.prefs.view] });
+  // On phones a view with a tab in the bottom bar is named there, so it gets no token of its own.
+  const namedByTab = phone.matches && PHONE_TAB_VIEWS.has(state.prefs.view);
+  if (state.prefs.view !== 'all' && !BRIEFING_VIEWS.has(state.prefs.view) && !namedByTab) parts.push({ id: 'view', label: VIEW_LABELS[state.prefs.view] });
   if (state.prefs.view === 'watchlist' && state.watchTerm) parts.push({ id: 'term', label: `Term: ${state.watchTerm}` });
   const hiddenCats = state.categories.filter((c) => state.prefs.hiddenCategories.includes(c));
   if (hiddenCats.length) {
@@ -1013,12 +1027,14 @@ function renderHeader() {
     // Briefing views carry the stale state in their summary line instead of a banner.
     $('stale-banner').hidden = !fresh.stale || staleHiddenFor() === latest || BRIEFING_VIEWS.has(state.prefs.view);
     const message = fresh.stale
-      ? `This feed was last ${fresh.label.toLowerCase()} (${clockTime(fresh.generated)}). Newer reporting may be missing.`
+      ? `This feed was last ${fresh.label.toLowerCase()} (${momentLabel(fresh.generated)}). Newer reporting may be missing.`
       : '';
     const text = $('stale-text');
     if (text.textContent !== message) text.textContent = message; // a live region: only real changes
     // Phones: one line. The chip already says Stale; this says how old and what it means.
-    $('stale-short').textContent = fresh.stale ? `Last update ${updatedLabel(fresh.generated)}. Newer reports may be missing.` : '';
+    // The chip beside the search already says how old the data is ("STALE 3d"): the phone banner
+    // adds only what that means.
+    $('stale-short').textContent = fresh.stale ? 'Newer reports may be missing.' : '';
   }
 }
 
@@ -1597,6 +1613,11 @@ function wireEvents() {
       applySuggestion();
       return;
     }
+    if (emptyAction === 'search-all') {
+      setView('all');
+      $('search').focus({ preventScroll: true });
+      return;
+    }
     if (emptyAction?.startsWith('lift-')) {
       clearFilter(emptyAction.slice(5), event);
       return;
@@ -1886,7 +1907,10 @@ syncDrawer();
 // Name the modifier Mac users actually press (Cmd+Z works everywhere it says Ctrl+Z).
 if (/Mac|iPhone|iPad/.test(navigator.userAgentData?.platform ?? navigator.platform ?? '')) $('undo-mod').textContent = '⌘';
 syncSearchPlaceholder();
-phone.addEventListener('change', syncSearchPlaceholder);
+phone.addEventListener('change', () => {
+  syncSearchPlaceholder();
+  if (state.data) renderAll(); // the view token appears or goes with the tab bar
+});
 midWidth.addEventListener('change', syncSearchPlaceholder);
 wireEvents();
 loadInitial();

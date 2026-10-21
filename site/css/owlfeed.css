@@ -10,9 +10,9 @@
   --border: #e1e4e9;
   --accent: #2453c8;
   --accent-soft: #e7edfb;
-  --cyber: #235594;
-  --geo: #8e24aa; /* purple */
-  --unread: #65a30d; /* lime green */
+  --cyber: #0e7490; /* cyan-teal: clearly apart from the action blue */
+  --geo: #a3199f; /* magenta-purple: well apart from the action blue */
+  --unread: #2453c8; /* the action blue: green stays for new and healthy */
   --other: #7c3aed;
   --new: #0f6e33;
   --new-soft: #dff4e6;
@@ -46,9 +46,9 @@
     --border: #252e4a;
     --accent: #7aa5ff;
     --accent-soft: #1b2650;
-    --cyber: #6fa8e8;
-    --geo: #c58cf0;
-    --unread: #a3e635;
+    --cyber: #3cc6d0;
+    --geo: #e08af0;
+    --unread: #7aa5ff;
     --other: #b794f6;
     --new: #4ade80;
     --new-soft: #10301f;
@@ -77,9 +77,9 @@
   --border: #252e4a;
   --accent: #7aa5ff;
   --accent-soft: #1b2650;
-  --cyber: #6fa8e8;
-  --geo: #c58cf0;
-  --unread: #a3e635;
+  --cyber: #3cc6d0;
+  --geo: #e08af0;
+  --unread: #7aa5ff;
   --other: #b794f6;
   --new: #4ade80;
   --new-soft: #10301f;
@@ -808,6 +808,15 @@ kbd {
   justify-content: center;
 }
 
+/* In the phone drawer it's the one bulk action, so it takes the action tint and stands apart
+   from the plain settings buttons below it. */
+.mark-all-drawer:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .btn-small {
   padding: 5px 10px;
   font-size: 13px;
@@ -858,7 +867,7 @@ kbd {
   display: block;
   height: 56px;
   margin: 2px 8px 0;
-  border-radius: 4px;
+  border-radius: 6px;
   background: repeating-linear-gradient(to bottom, var(--surface-2) 0 14px, transparent 14px 28px);
 }
 
@@ -1867,9 +1876,11 @@ mark.hl-watch {
 }
 
 /*
- * Unread is what the reader still has to do, so unread rows carry the mark: a Night Sky Blue dot
- * in the gutter beside the headline. Read is the quiet state: the headline fades and the ring
- * fills with a muted check, with no tint. (In the Unread view every row is unread: no dots.)
+ * Unread is what the reader still has to do, so unread rows carry the mark: a dot in the action
+ * blue in the gutter beside the headline. A NEW row is unread by definition, and its green badge
+ * already says so, so the dot marks only older unread items. (In the New and Unread views every
+ * row qualifies: no dots.) Read is the quiet state: the headline fades and the ring fills with a
+ * muted check, with no tint.
  */
 .btn-read .path-tick {
   opacity: 0;
@@ -1894,6 +1905,8 @@ mark.hl-watch {
   background: var(--unread);
 }
 
+.item:has(.badge-new) .item-title::before,
+.feed[data-showing="new"] .item .item-title::before,
 .feed[data-showing="unread"] .item .item-title::before {
   content: none;
 }
@@ -2204,6 +2217,16 @@ html:not([data-app]) .loading {
     margin: 2px 0;
   }
 
+  /* Beside the 44px buttons the meta line is narrow: the source takes its own line (so no
+     separator dangles at a line end), and time, age and badges follow beneath it. */
+  .item-meta > .meta-part:first-child {
+    flex-basis: 100%;
+  }
+
+  .item-meta > .meta-part:first-child .sep {
+    display: none;
+  }
+
   .item-actions,
   .feed[data-density="compact"] .item-actions {
     flex-direction: row;
@@ -2278,9 +2301,10 @@ html:not([data-app]) .loading {
     color: var(--accent);
   }
 
+  /* Sized so Filters' label sits on the same baseline as the labels above the counts. */
   .tab-filters .icon {
-    width: 18px;
-    height: 18px;
+    width: 15px;
+    height: 15px;
   }
 
   .tab-filters[aria-expanded="true"] {
@@ -2301,6 +2325,13 @@ html:not([data-app]) .loading {
     min-height: 44px;
     margin: -12px -6px;
     padding: 0 6px;
+  }
+}
+
+/* The smallest phones (320px): "Watchlist" would touch its tab's edges, so the labels shrink a notch. */
+@media (max-width: 340px) {
+  .tab-label {
+    font-size: 12px;
   }
 }
 
@@ -2386,11 +2417,36 @@ html:not([data-app]) .loading {
 @media (forced-colors: active) {
   .item:not(.is-read) .item-title::before,
   .cat-dot,
+  .cat-dot.cat-cyber,
+  .cat-dot.cat-geopolitics,
   .health-dot,
+  .health-dot.is-ok,
+  .health-dot.is-error,
   .item-source::before,
+  .item-source.cat-cyber::before,
+  .item-source.cat-geopolitics::before,
   .glyph-unread {
     forced-color-adjust: none;
     background: CanvasText;
+  }
+
+  /* With every colour gone the dots tell things apart by shape and system colour instead:
+     unread takes the Highlight colour, Geopolitics is a rounded square (Cyber stays round), and a
+     source that isn't answering is a hollow ring (an answering one stays filled). */
+  .item:not(.is-read) .item-title::before,
+  .glyph-unread {
+    background: Highlight;
+  }
+
+  .cat-dot.cat-geopolitics,
+  .item-source.cat-geopolitics::before {
+    border-radius: 3px;
+  }
+
+  .health-dot.is-error {
+    box-sizing: border-box;
+    border: 2px solid CanvasText;
+    background: transparent;
   }
 
   .view-btn[aria-current="true"],

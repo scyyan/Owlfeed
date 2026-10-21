@@ -897,7 +897,31 @@ def test_new_view_never_reads_as_all_clear_while_stale(page, server):
     expect(page.get_by_text("No refresh since 11:00 AM")).to_be_visible()
     expect(page.get_by_text("can’t confirm there’s nothing new", exact=False)).to_be_visible()
     expect(page.get_by_text("Nothing new since")).to_have_count(0)
-    expect(page.get_by_role("button", name="Go to Unread")).to_be_visible()
+    expect(page.get_by_text("That was 3 hours ago.", exact=False)).to_be_visible()
+    expect(page.get_by_role("button", name="Show Unread, newest first")).to_be_visible()
+
+
+def test_stale_new_view_names_the_day_once_it_is_older_than_today(page, server):
+    server.write_feed(build_feed(generated_at=NOW - timedelta(days=3)))
+    set_last_visit(page, iso(NOW))
+    open_dashboard(page, server)
+    page.locator('[data-view="new"]').click()
+    # NOW is a Thursday: three days earlier is Monday, so a bare clock time would be ambiguous.
+    expect(page.locator(".empty-title")).to_have_text("No refresh since Mon 2:00 PM")
+    expect(page.get_by_text("That was 3 days ago.", exact=False)).to_be_visible()
+
+
+def test_a_search_a_view_hides_points_to_all_items(page, server):
+    open_dashboard(page, server)
+    page.locator("article.item").first.get_by_role("button", name="Save for later").click()  # something saved, but not this
+    page.locator('[data-view="saved"]').click()
+    page.fill("#search", "Weekly vulnerability")
+    expect(page.locator(".empty-title")).to_have_text("Nothing in Saved matches “Weekly vulnerability”")
+    expect(page.locator(".empty-detail")).to_contain_text("in All items")
+    expect(page.get_by_text("Check the spelling")).to_have_count(0)
+    page.get_by_role("button", name="Search all items").click()
+    expect(page.locator(TITLES)).to_have_text(["Weekly vulnerability summary"])
+    expect(page.locator('.view-btn[data-view="all"]')).to_have_attribute("aria-current", "true")
 
 
 def test_keyboard_cursor_shows_in_every_view(page, server):
@@ -1096,9 +1120,9 @@ def test_phone_tab_bar_switches_views_and_rows_start_comfortable(make_page, serv
     tabbar = page.locator("#tabbar")
     expect(tabbar).to_be_visible()
     expect(page.locator("#menu-btn")).to_be_hidden()
-    tabbar.locator('[data-tab="saved"]').click()
-    expect(tabbar.locator('[data-tab="saved"]')).to_have_attribute("aria-current", "true")
-    expect(page.locator('.view-btn[data-view="saved"]')).to_have_attribute("aria-current", "true")
+    tabbar.locator('[data-tab="unread"]').click()
+    expect(tabbar.locator('[data-tab="unread"]')).to_have_attribute("aria-current", "true")
+    expect(page.locator('.view-btn[data-view="unread"]')).to_have_attribute("aria-current", "true")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 
 
@@ -1188,3 +1212,67 @@ def test_phone_freshness_label_uses_short_ages(make_page, server):
     page.clock.set_fixed_time(NOW)
     open_dashboard(page, server)
     expect(page.locator("#watch-short")).to_have_text("9m")
+
+
+def unread_dot(page, row):
+    return row.locator(".item-title").evaluate("el => getComputedStyle(el, '::before').content")
+
+
+def test_unread_dot_marks_only_older_unread_rows(page, server):
+    set_last_visit(page, iso(NOW - timedelta(minutes=100)))
+    open_dashboard(page, server)
+    rows = page.locator("article.item")
+    new_row = rows.filter(has=page.locator(".badge-new")).first
+    older_row = rows.filter(has_not=page.locator(".badge-new")).first
+    # A NEW row is unread by definition and its badge says so; only older unread rows get the dot.
+    assert unread_dot(page, new_row) == "none"
+    assert unread_dot(page, older_row) == '""'
+    older_row.get_by_role("button", name="Mark as read").click()
+    assert unread_dot(page, older_row) == "none"  # read: the dot goes
+    page.locator('[data-view="new"]').click()
+    assert unread_dot(page, page.locator("article.item").first) == "none"  # no dots in the New view
+
+
+def test_forced_colors_tell_dots_apart_by_shape(browser, server):
+    context = browser.new_context(viewport={"width": 1280, "height": 900}, forced_colors="active", locale="en-US", timezone_id="UTC")
+    page = context.new_page()
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    radius = lambda sel: page.locator(sel).first.evaluate("el => getComputedStyle(el).borderRadius")
+    colour = lambda sel: page.locator(sel).first.evaluate("el => getComputedStyle(el).backgroundColor")
+    assert radius(".cat-dot.cat-cyber") != radius(".cat-dot.cat-geopolitics")  # round vs rounded square
+    assert colour(".cat-dot.cat-cyber") == colour(".cat-dot.cat-geopolitics") == "rgb(0, 0, 0)"  # system colour, not the palette
+    error_dot = page.locator(".health-dot.is-error").first
+    assert error_dot.evaluate("el => getComputedStyle(el).borderTopWidth") == "2px"  # a failing source is a hollow ring
+    context.close()
+
+
+def test_phone_view_token_goes_when_a_tab_names_the_view(make_page, server):
+    page = make_page(viewport=(390, 844))
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    page.locator('#tabbar [data-tab="watchlist"]').click()
+    expect(page.locator('#tabbar [data-tab="watchlist"]')).to_have_attribute("aria-current", "true")
+    expect(page.locator('#active-filters [data-clear-filter="view"]')).to_have_count(0)  # the tab names it
+    # Saved has no tab: its token stays, so the view is still named.
+    page.get_by_role("button", name="Open views and filters").click()
+    page.locator('.view-btn[data-view="saved"]').click()
+    expect(page.locator('#active-filters [data-clear-filter="view"]')).to_have_count(1)
+    expect(page.locator("#tabbar [aria-current]")).to_have_count(0)
+    page.set_viewport_size({"width": 1280, "height": 900})  # wider screens have no tab bar: the token returns
+    page.locator('.view-btn[data-view="watchlist"]').click()
+    expect(page.locator('#active-filters [data-clear-filter="view"]')).to_have_count(1)
+
+
+def test_desktop_link_says_it_opens_shortcuts_and_labels(page, server):
+    open_dashboard(page, server)
+    page.get_by_role("button", name="Shortcuts & labels").click()
+    expect(page.get_by_role("dialog")).to_contain_text("What the labels mean")
+    expect(page.get_by_role("dialog")).to_contain_text("Keyboard shortcuts")
+
+
+def test_phone_tab_names_the_watchlist_in_full(make_page, server):
+    page = make_page(viewport=(320, 640))
+    open_dashboard(page, server)
+    expect(page.locator("#tabbar .tab-label")).to_have_text(["All", "New", "Unread", "Watchlist", "Filters"])
+    assert page.evaluate("[...document.querySelectorAll('.tab-label')].every(l => l.scrollWidth <= l.parentElement.clientWidth)")

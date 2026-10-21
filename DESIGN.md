@@ -6,12 +6,10 @@ colors:
   night-sky-blue-soft: "#e7edfb"
   night-sky-blue-dark: "#7aa5ff"
   night-sky-blue-soft-dark: "#1b2650"
-  cyber-blue: "#235594"
-  cyber-blue-dark: "#6fa8e8"
-  geopolitics-purple: "#8e24aa"
-  geopolitics-purple-dark: "#c58cf0"
-  unread-lime: "#65a30d"
-  unread-lime-dark: "#a3e635"
+  cyber-cyan: "#0e7490"
+  cyber-cyan-dark: "#3cc6d0"
+  geopolitics-purple: "#a3199f"
+  geopolitics-purple-dark: "#e08af0"
   other-violet: "#7c3aed"
   other-violet-dark: "#b794f6"
   owls-eye-amber: "#a15c00"
@@ -215,8 +213,8 @@ mean exactly one thing.
 ### Primary
 - **Night Sky Blue** (#2453c8 light; #7aa5ff dark): action and current state. It marks the
   selected sidebar view and phone tab (on its soft tint, #e7edfb / #1a2640), title hover, link
-  buttons, checkbox accents, focus rings, the "↑ N new items" pill, and
-  focus. (The unread dot is Unread Lime, below.)
+  buttons, checkbox accents, focus rings, the "↑ N new items" pill, and the 6px unread dot beside
+  an older unread headline (the dot uses this same blue, so green is left for new and healthy).
 
 ### Secondary
 - **Owl's-Eye Amber** (#a15c00 light; #f5c451 dark): what the owl has noticed. It's used for
@@ -236,10 +234,13 @@ mean exactly one thing.
   dots and labels, the "updated N hours ago" warning, and the stale-data banner.
 
 ### Category hues
-- **Cyber Blue** (#235594 light; #6fa8e8 dark): the dot for Cyber sources, and the ink of
-  Cyber source names in item rows.
-- **Geopolitics Purple** (#8e24aa light; #c58cf0 dark): the dot and the byline ink for
-  Geopolitics sources. It replaced an ember orange that sat too close to Alarm Rust and Owl's-Eye
+- **Cyber Cyan** (#0e7490 light; #3cc6d0 dark): the dot for Cyber sources, and the ink of
+  Cyber source names in item rows. It is a cyan-teal, kept well away from Night Sky Blue (about
+  55–60 ΔE apart) so a category is never read as a selected, searched or focused state. It passes
+  4.5:1 on a plain row and on the watchlist wash.
+- **Geopolitics Purple** (#a3199f light; #e08af0 dark): the dot and the byline ink for
+  Geopolitics sources. A magenta-leaning purple, about 40–46 ΔE from Night Sky Blue and 6.1–7.7:1 on plain and
+  watchlist rows. It replaced an ember orange that sat too close to Alarm Rust and Owl's-Eye
   Amber: no category may borrow a warm hue, because warm hues mean watchlist, saved or failure.
 - **Other Violet** (#7c3aed light; #b794f6 dark): the fallback dot for any future category.
 
@@ -262,8 +263,8 @@ mean exactly one thing.
 
 ### Named Rules
 **The One Meaning Rule.** Each signal hue means one thing everywhere, and categories keep to
-cool hues (blue, teal, violet) so they can never be mistaken for a signal. Green is new or healthy,
-amber is watchlist or saved, rust is failure, blue is action, search, unread or Cyber. Never use one decoratively,
+cool hues (cyan, purple, violet) so they can never be mistaken for a signal. Green is new or healthy,
+amber is watchlist or saved, rust is failure, blue is action, search or an older unread item. Never use one decoratively,
 and never give a second meaning to a hue that already has one.
 
 **The Twin Watch Rule.** Every color token ships in a light and a dark value, and both pass WCAG
@@ -330,12 +331,16 @@ padding. Sidebar rows are compact (4–8px vertical padding), and items breathe 
   iOS never zooms on focus), "Mark N read" moves into
   the drawer, the search placeholder shortens to "Search", item padding tightens to 12px/10px,
   titles drop to 17px, and summaries clamp to three lines. Headlines and summaries run the full
-  row width; save and read sit side by side at the end of the meta line. Rows start comfortable,
-  as on wider screens, until the reader picks a density. A **tab bar** fixed to the bottom (All, New, Hits, Saved with
-  their counts, plus Filters, which opens the drawer) replaces the top-left menu button, keeps
-  the main views within thumb reach, and names the current view, so the idle bar is hidden.
+  row width; save and read sit side by side beside a two-line meta block (the source on the first
+  line, time, age and badges beneath it, so no separator dangles at a line end). Rows start comfortable,
+  as on wider screens, until the reader picks a density. A **tab bar** fixed to the bottom (All, New, Unread, Watchlist with
+  their counts, plus Filters, which opens the drawer; Saved stays in the drawer) replaces the top-left
+  menu button, keeps the main views within thumb reach, and names the current view, so the idle bar is
+  hidden and a view with a tab gets no token in the filter bar (Saved, which has no tab, keeps its token).
 - **Drawer footer on touch:** settings links become a two-column grid of 44px bordered targets,
-  and "Shortcuts" is hidden (it only helps with a keyboard).
+  and "Shortcuts & labels" is hidden (it only helps with a keyboard; the drawer's "What the labels mean" opens
+  the same dialog). "Mark N read" sits above them in the action tint (Night Sky Blue on its soft fill), so
+  the one bulk action is not mistaken for a setting.
 - **Touch (`hover: none`):** controls that only appear on hover, such as the source "only"
   shortcut, are always visible, and item actions, icon buttons, the watch status and the search
   field are at least 44px.
@@ -412,7 +417,11 @@ border at rest. Ghost buttons remain only where a control sits inside running te
   An empty state is never a dead end: it names what was searched or when "since" was, and offers
   the one next step (Clear filters, Go to Unread, or the * version of a search that would match).
   It never claims an all-clear it can't know: while the feed is stale, "New since" reads "No
-  refresh since 9:58 PM", and a disabled bulk button reads "Nothing to mark", not "All read".
+  refresh since 9:58 PM" (with the day once it isn't today: "yesterday 9:58 PM", "Fri 9:58 PM") plus "That was
+  3 days ago." and a primary "Show Unread, newest first", and a disabled bulk button reads "Nothing to mark", not
+  "All read". When the view itself is what hides a search's matches (Watchlist hits, Unread, Saved, New), the
+  empty state names the view and where the matches are: "Nothing in Watchlist hits matches “ransom”. 5 items
+  match in All items." with "Search all items", never "Check the spelling".
 
 ### Inputs / Fields
 - **Search:** a Paper surface, hairline border, 10px radius, and an 18px magnifier icon inset
@@ -440,9 +449,10 @@ is a meta row: the source name at 650 weight in its category ink with its dot, t
 the relative age, and badges (the watchlist badge carries a drawn eye). Then comes the summary.
 Save (star) and read (ring) buttons are stacked on the right as firm 34px squares. The keyboard
 cursor (Tab or j/k) tints the whole row with Night Sky Blue's soft tint, not just the headline. Saved fills
-the star in Saved Amber on the amber tint. Unread rows carry the mark: a 6px Unread Lime dot (#65a30d light; #a3e635 dark)
-in the gutter, centred on the headline's first line (none in the Unread view, where every row is
-unread). Read is the quiet state: the ring fills with a Slate Muted check, with no tint, and the
+the star in Saved Amber on the amber tint. Unread rows carry the mark: a 6px Night Sky Blue dot
+in the gutter, centred on the headline's first line. A NEW row is unread by definition and its
+green badge already says so, so the dot marks only older unread items (none in the New or Unread
+views, where every row qualifies). Read is the quiet state: the ring fills with a Slate Muted check, with no tint, and the
 headline and summary fade to Slate Muted. Undated
 items show a `~` before their time. Search matches are underlined in Night Sky Blue on its soft
 tint; watchlist terms keep Highlight Gold. Where both cover the same word, the watchlist mark wins
@@ -504,6 +514,11 @@ them (never three or four bars, which read as the menu). At 1000px and below, "M
 its count beside the double check ("✓✓ 328"). On phones in compact mode only the star shows: rows
 stay one tap target tall, opening an item marks it read, and "Mark these N read" closes out a list.
 
+**Forced colours.** In Windows High Contrast (`forced-colors: active`) every colour is replaced
+by a system colour, so dots tell things apart by shape: Cyber is round and Geopolitics a rounded
+square, the unread dot takes the Highlight colour, an answering source is a filled dot and one that
+isn't answering is a hollow ring. Selected views, tabs and pressed toggles get a Highlight outline.
+
 **Saved is an archive.** When category or source filters hide some saved items, the filter bar
 says how many ("2 saved items hidden by your filters") with "Show them".
 
@@ -521,7 +536,7 @@ touch drops the keyboard shortcuts and leads with the label glossary and search 
 
 **Briefing chrome.** New and Unread carry no view token and no idle bar: the summary line names
 them. While stale, the banner gives way in these views to the summary's first item, "Stale: last
-update 9:58 PM, 1 day ago" in Alarm Rust. The summary's
+update yesterday 9:58 PM, 1 day ago" in Alarm Rust. The summary's
 "·" separators end their item, so a wrapped line never starts with one.
 
 **One name for new.** NEW is always "since your last visit" (with its time), or on a first visit
@@ -561,7 +576,7 @@ dialog spells out New, Unread and Just arrived.
   spelled out there, never only in a tooltip.
 - **Blink:** the eyes blink once (0.42s, expo ease-out) when a new build is applied. It is the
   system's one authored motion, and it is removed under reduced motion.
-- **Stale banner** (one short line on phones: "Last update 1 day ago. Newer reports may be missing."): an Alarm Rust outlined box with a 10px radius above the timeline, written for
+- **Stale banner** (one short line on phones: "Newer reports may be missing." The STALE chip beside the search already says how old the data is): an Alarm Rust outlined box with a 10px radius above the timeline, written for
   readers ("last updated 3 hours ago (9:58 PM). Newer reporting may be missing."), with a "Hide
   for now" link that hides it for that build for the rest of the session. The chip keeps saying
   STALE. Fixes for the site owner (the Refresh feed workflow, linked on GitHub Pages) appear only
