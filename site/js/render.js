@@ -113,7 +113,7 @@ function matchWindow(item, ctx) {
   return { start: space > 0 ? space + 1 : 0 };
 }
 
-/** ctx: { now, view, matcher, tokens, isRead(id), isSaved(id), isNew(item) } */
+/** ctx: { now, view, matcher, tokens, isRead(id), isSaved(id), isNew(item), isArrived(item) } */
 export function itemElement(item, ctx) {
   const article = el('article', 'item');
   article.dataset.id = item.id;
@@ -154,7 +154,12 @@ export function itemElement(item, ctx) {
     return span;
   };
   meta.append(part(source, separator()), part(time, separator()), age);
-  if (isNew) meta.append(el('span', 'badge badge-new', 'New'));
+  // "Just in" (landed while the page was open) outranks NEW. Both drop once the row is read (CSS).
+  if (ctx.isArrived?.(item)) {
+    const badge = el('span', 'badge badge-new badge-arrived', 'Just in');
+    badge.title = 'Arrived while this page was open';
+    meta.append(badge);
+  } else if (isNew) meta.append(el('span', 'badge badge-new', 'New'));
   for (const term of item.watch) {
     const badge = el('span', 'badge badge-watch');
     badge.title = `Matches your watchlist term “${term}”`;
@@ -353,7 +358,7 @@ export function healthTitle(source, now) {
  * Sources grouped under collapsible headings. openGroups holds the groups the reader opened; a
  * group with a failing source or a partial selection opens by itself.
  */
-export function renderSources(container, sources, { hiddenSources, hiddenCategories, counts, now, openGroups }) {
+export function renderSources(container, sources, { hiddenSources, hiddenCategories, counts, now, openGroups, staleSince = null }) {
   const groups = new Map();
   for (const source of sources) {
     const key = `${source.category} › ${source.group}`;
@@ -383,6 +388,9 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
     for (const source of group.sources) {
       const li = el('li', 'source-row');
       li.classList.toggle('is-error', source.status !== 'ok');
+      // Stale data: a source that answered at the last sweep may not answer now. Unknown, not healthy.
+      const unknown = staleSince != null && source.status === 'ok';
+      const unknownText = unknown ? `Answered at the last sweep, ${updatedLabel(staleSince, now)}. No refresh since, so its state now is unknown` : '';
       li.append(
         checkRow({
           attr: 'source',
@@ -390,9 +398,9 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
           checked: !hiddenSources.has(source.id),
           label: source.name,
           count: counts.get(source.id) ?? 0,
-          dotClass: `health-dot ${source.status === 'ok' ? 'is-ok' : 'is-error'}`,
-          dotTitle: healthTitle(source, now),
-          dotText: source.status === 'ok' ? 'answering' : `not answering: ${healthTitle(source, now)}`,
+          dotClass: `health-dot ${unknown ? 'is-unknown' : source.status === 'ok' ? 'is-ok' : 'is-error'}`,
+          dotTitle: unknown ? unknownText : healthTitle(source, now),
+          dotText: unknown ? `state unknown: ${unknownText}` : source.status === 'ok' ? 'answering' : `not answering: ${healthTitle(source, now)}`,
         }),
       );
       const only = el('button', 'only-btn', 'only');

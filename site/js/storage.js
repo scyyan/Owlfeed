@@ -13,7 +13,7 @@ const READ_TTL_DAYS = 30;
 const DAY = 86_400_000;
 
 export const DENSITIES = ['comfortable', 'compact'];
-export const DEFAULT_PREFS = Object.freeze({ view: 'all', hiddenCategories: [], hiddenSources: [], density: 'comfortable' });
+export const DEFAULT_PREFS = Object.freeze({ view: 'all', hiddenCategories: [], hiddenSources: [], density: 'comfortable', shortcuts: true });
 
 function defaultBackend() {
   try {
@@ -173,6 +173,8 @@ export function createStorage(backend = defaultBackend()) {
         hiddenSources: stringList(prefs.hiddenSources),
         // No stored choice yet: the app picks the default (comfortable).
         density: DENSITIES.includes(prefs.density) ? prefs.density : null,
+        // Single-key shortcuts (j, k, d, 1–5...) are on unless the reader turned them off.
+        shortcuts: prefs.shortcuts !== false,
       };
     },
     setPrefs: (prefs) => save('prefs', prefs),
@@ -256,6 +258,7 @@ export function createStorage(backend = defaultBackend()) {
           hiddenCategories: stringList(data.prefs.hiddenCategories),
           hiddenSources: stringList(data.prefs.hiddenSources),
           density: DENSITIES.includes(data.prefs.density) ? data.prefs.density : DEFAULT_PREFS.density,
+          shortcuts: data.prefs.shortcuts !== false,
         });
       }
       return { terms: termsAdded, saved: savedAdded };

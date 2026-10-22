@@ -19,7 +19,7 @@
   --watch: #a15c00;
   --shadow-pop: 0 6px 18px rgb(0 0 0 / 18%); /* dialogs, popovers and toasts */
   --watch-soft: #fdf0d9;
-  --watch-wash: #fef6e8;
+  --watch-wash: #fbe7c6; /* 1.21:1 on paper: visible from across the desk; muted text still 4.66:1 */
   --mark: #ffe58f;
   --ok: #16a34a;
   --error: #b93d06;
@@ -54,7 +54,7 @@
     --new-soft: #10301f;
     --watch: #f5c451;
     --watch-soft: #3a2c10;
-    --watch-wash: #27221c;
+    --watch-wash: #312a17;
     --mark: rgb(245 196 81 / 32%);
     --ok: #4ade80;
     --error: #fb8b4b;
@@ -85,7 +85,7 @@
   --new-soft: #10301f;
   --watch: #f5c451;
   --watch-soft: #3a2c10;
-  --watch-wash: #27221c;
+  --watch-wash: #312a17;
   --mark: rgb(245 196 81 / 32%);
   --ok: #4ade80;
   --error: #fb8b4b;
@@ -198,6 +198,42 @@ kbd {
   margin: 0;
   font-size: 17.5px;
   font-weight: 650;
+}
+
+.keys-switch {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.keys-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.keys-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.keys-switch-hint {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+  text-wrap: pretty;
+}
+
+/* Shortcuts off: the list stays readable, but plainly not in force. */
+.help.shortcuts-off .keys-shortcuts {
+  opacity: 0.55;
 }
 
 .keys {
@@ -442,6 +478,7 @@ kbd {
   gap: 8px;
   flex: 1;
   min-width: 0;
+  min-height: 32px;
   padding: 4px 6px;
   border-radius: 6px;
   cursor: pointer;
@@ -475,15 +512,24 @@ kbd {
 }
 
 .only-btn {
+  position: relative;
   opacity: 0;
   min-height: 24px;
   padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
   cursor: pointer;
+}
+
+/* A 32px target around the 24px button (the row is 32px tall), without a heavier look. */
+.only-btn::after,
+.chip-remove::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
 }
 
 .source-row:hover .only-btn,
@@ -514,6 +560,12 @@ kbd {
 
 .health-dot.is-error {
   background: var(--error);
+}
+
+/* Stale data: answered at the last sweep, state now unknown. A hollow ring, never a healthy green. */
+.health-dot.is-unknown {
+  border: 1.5px solid var(--muted);
+  background: transparent;
 }
 
 .source-row.is-error .row-label {
@@ -666,17 +718,6 @@ kbd {
   color: var(--muted);
 }
 
-/* The unread dot, as drawn beside a headline. */
-.glyph-unread {
-  display: inline-block;
-  vertical-align: middle;
-  width: 6px;
-  height: 6px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: var(--unread);
-}
-
 .glyph-saved {
   background: var(--watch-soft);
   color: var(--saved);
@@ -709,9 +750,10 @@ kbd {
 }
 
 .chip-remove {
+  position: relative;
   display: inline-grid;
   place-items: center;
-  width: 24px; /* WCAG 2.2 minimum target size */
+  width: 24px; /* drawn at 24px; ::after widens the target to 32px */
   height: 24px;
   padding: 0;
   border: 0;
@@ -734,6 +776,7 @@ kbd {
   margin: 8px 6px 0;
   font-size: 12px;
   color: var(--muted);
+  text-wrap: pretty;
 }
 
 .side-footer {
@@ -903,7 +946,8 @@ kbd {
   align-items: center;
   gap: 10px;
   height: var(--topbar-h);
-  padding: 0 20px;
+  /* On wide screens the bar's contents line up with the timeline's day cards below. */
+  padding: 0 max(20px, calc((100% - 880px) / 2 + 24px));
   background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
@@ -1057,7 +1101,7 @@ kbd {
   padding: 1px 7px;
   border: 1px solid currentColor;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.5px;
   line-height: 15px;
@@ -1169,6 +1213,11 @@ kbd {
 .watch-legend dd {
   margin: 0;
   text-wrap: pretty;
+}
+
+.watch-actions {
+  display: flex;
+  margin: 12px 0 0;
 }
 
 .watch-failing {
@@ -1370,8 +1419,8 @@ kbd {
   margin: 8px 2px 0;
 }
 
-/* In the New view every row is new: the badge would mark nothing. */
-.feed[data-showing="new"] .badge-new {
+/* In the New view every row is new: the badge would mark nothing (Just in still says more). */
+.feed[data-showing="new"] .badge-new:not(.badge-arrived) {
   display: none;
 }
 
@@ -1599,10 +1648,11 @@ kbd {
 
 .item-title {
   margin: 0;
-  font-size: 17.5px; /* 1.25× the 14px summary: the headline leads by size as well as weight */
+  font-size: 17.5px; /* 1.25× the 14px summary at every width: the headline leads by size as well as weight */
   font-weight: 650;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  text-wrap: pretty; /* no one-word last lines */
 }
 
 .item-title a {
@@ -1638,17 +1688,8 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-weight: 650;
-  color: var(--text-2);
-}
-
-/* The domain reads at a glance: source names carry their category's ink. */
-.item-source.cat-cyber {
-  color: var(--cyber);
-}
-
-.item-source.cat-geopolitics {
-  color: var(--geo);
+  font-weight: 600;
+  color: var(--text-2); /* neutral ink, so the headline leads; the dot carries the category hue */
 }
 
 .item-source::before {
@@ -1685,6 +1726,18 @@ kbd {
   color: var(--new);
   text-transform: uppercase;
   letter-spacing: 0.4px;
+}
+
+/* Just in: arrived while the page was open. The newest kind of new, so the same green, filled. */
+.badge-arrived,
+.term-arrived {
+  background: var(--new);
+  color: var(--on-accent);
+}
+
+/* NEW and Just in mean "still to read": a read row drops them. */
+.item.is-read .badge-new {
+  display: none;
 }
 
 .badge-watch {
@@ -1856,8 +1909,8 @@ mark.hl-watch {
 }
 
 .feed[data-density="compact"] .item-btn {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
 }
 
 .feed[data-density="compact"] .item-btn .icon {
@@ -1876,11 +1929,9 @@ mark.hl-watch {
 }
 
 /*
- * Unread is what the reader still has to do, so unread rows carry the mark: a dot in the action
- * blue in the gutter beside the headline. A NEW row is unread by definition, and its green badge
- * already says so, so the dot marks only older unread items. (In the New and Unread views every
- * row qualifies: no dots.) Read is the quiet state: the headline fades and the ring fills with a
- * muted check, with no tint.
+ * Unread vs read is told by the headline itself: unread is full, bold ink and read fades to muted
+ * at a lighter weight, with the ring filling with a check. Whichever state is the minority stands
+ * out, so no per-row dot is needed (forced-colours mode, which drops the fade, keeps one below).
  */
 .btn-read .path-tick {
   opacity: 0;
@@ -1892,23 +1943,6 @@ mark.hl-watch {
 
 .item-title {
   position: relative;
-}
-
-.item:not(.is-read) .item-title::before {
-  content: "";
-  position: absolute;
-  top: calc(0.675em - 3px); /* centred on the first line (line-height 1.35) */
-  left: -11px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--unread);
-}
-
-.item:has(.badge-new) .item-title::before,
-.feed[data-showing="new"] .item .item-title::before,
-.feed[data-showing="unread"] .item .item-title::before {
-  content: none;
 }
 
 .btn-read[aria-pressed="true"] .path-tick {
@@ -1950,8 +1984,8 @@ html:not([data-app]) .loading {
 
 /*
  * Half screens and second monitors (up to 1100px): the search keeps a usable width. The watch
- * status takes its compact form ("1d", the tally only while a source fails) and "Mark N read"
- * becomes an icon (its accessible name and tooltip still say the count).
+ * status takes its compact form ("14m ago", the tally only while a source fails). "Mark N read"
+ * keeps its words: an icon and a bare number read like "N done".
  */
 @media (max-width: 1100px) {
   .watch-short {
@@ -1959,8 +1993,7 @@ html:not([data-app]) .loading {
   }
 
   .updated,
-  .watch-unit,
-  .topbar .mark-tail {
+  .watch-unit {
     display: none;
   }
 
@@ -1974,12 +2007,8 @@ html:not([data-app]) .loading {
   }
 }
 
-/* Narrower still: the icon and the count ("✓✓ 12"); the full name stays in the tooltip. */
+/* Narrower still: the button tightens, the label stays whole. */
 @media (max-width: 1000px) {
-  .topbar .mark-word {
-    display: none;
-  }
-
   .topbar .mark-all {
     height: 38px;
     padding: 0 10px;
@@ -2181,10 +2210,6 @@ html:not([data-app]) .loading {
     gap: 2px 8px;
   }
 
-  .item-title {
-    font-size: 17px;
-  }
-
   /* Phones: three short lines of summary, so a glance still covers more than two items. */
   .item-summary {
     -webkit-line-clamp: 3;
@@ -2240,6 +2265,20 @@ html:not([data-app]) .loading {
     margin: 0;
   }
 
+  /* "Hide for now" keeps its small look but gets a full-height tap target. */
+  .stale-dismiss {
+    min-height: 44px;
+    margin: -12px -6px;
+    padding: 0 6px;
+  }
+}
+
+/*
+ * 900px and under (phones, tablets, a half-screen window): the sidebar is a drawer, so a tab bar
+ * fixed to the bottom names the current view and keeps the main views one tap away. Filters
+ * opens the drawer.
+ */
+@media (max-width: 900px) {
   /* The tab bar names the view, so the idle bar would only repeat it. */
   .active-filters.is-idle {
     display: none;
@@ -2318,13 +2357,6 @@ html:not([data-app]) .loading {
   /* Toasts and Undo sit above the tab bar, not over it. */
   .status {
     bottom: calc(72px + env(safe-area-inset-bottom));
-  }
-
-  /* "Hide for now" keeps its small look but gets a full-height tap target. */
-  .stale-dismiss {
-    min-height: 44px;
-    margin: -12px -6px;
-    padding: 0 6px;
   }
 }
 
@@ -2415,6 +2447,22 @@ html:not([data-app]) .loading {
 /* Windows High Contrast and other forced-colour modes drop backgrounds, so markers drawn only
    with a background (dots, selected views, pressed toggles) get a system colour or an outline. */
 @media (forced-colors: active) {
+  /* The read fade is gone here, so older unread rows get a dot in the gutter instead. */
+  .item:not(.is-read):not(:has(.badge-new)) .item-title::before {
+    content: "";
+    position: absolute;
+    top: calc(0.675em - 3px); /* centred on the first line (line-height 1.35) */
+    left: -11px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .feed[data-showing="new"] .item .item-title::before,
+  .feed[data-showing="unread"] .item .item-title::before {
+    content: none;
+  }
+
   .item:not(.is-read) .item-title::before,
   .cat-dot,
   .cat-dot.cat-cyber,
@@ -2424,8 +2472,7 @@ html:not([data-app]) .loading {
   .health-dot.is-error,
   .item-source::before,
   .item-source.cat-cyber::before,
-  .item-source.cat-geopolitics::before,
-  .glyph-unread {
+  .item-source.cat-geopolitics::before {
     forced-color-adjust: none;
     background: CanvasText;
   }
@@ -2433,8 +2480,7 @@ html:not([data-app]) .loading {
   /* With every colour gone the dots tell things apart by shape and system colour instead:
      unread takes the Highlight colour, Geopolitics is a rounded square (Cyber stays round), and a
      source that isn't answering is a hollow ring (an answering one stays filled). */
-  .item:not(.is-read) .item-title::before,
-  .glyph-unread {
+  .item:not(.is-read) .item-title::before {
     background: Highlight;
   }
 
@@ -2443,10 +2489,15 @@ html:not([data-app]) .loading {
     border-radius: 3px;
   }
 
-  .health-dot.is-error {
+  .health-dot.is-error,
+  .health-dot.is-unknown {
     box-sizing: border-box;
     border: 2px solid CanvasText;
     background: transparent;
+  }
+
+  .health-dot.is-unknown {
+    border-style: dotted;
   }
 
   .view-btn[aria-current="true"],

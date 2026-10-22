@@ -173,9 +173,12 @@ def test_auto_refresh_adds_new_items(make_page, server):
     page.clock.run_for(5 * 60_000 + 1_000)
     breaking = item(page, "Breaking: sample item")
     expect(breaking).to_be_visible()
-    expect(breaking.locator(".badge-new")).to_be_visible()
-    expect(page.locator("#status")).to_contain_text("1 new item added")
+    expect(breaking.locator(".badge-arrived")).to_have_text("Just in")
+    expect(page.locator("#status")).to_contain_text("1 just arrived")
     expect(page.locator("#updated")).to_have_text("Updated just now")
+    expect(page).to_have_title("(1) Owlfeed")  # a glance at the tab says what changed
+    breaking.get_by_role("button", name="Mark as read").click()
+    expect(page).to_have_title("Owlfeed")
 
 
 def test_new_items_wait_behind_a_pill_when_scrolled_down(make_page, server):
@@ -354,7 +357,8 @@ def test_restarring_an_aged_out_saved_item(page, server):
     page.locator('[data-view="saved"]').click()
     saved = item(page, "Weekly vulnerability summary")
     saved.get_by_role("button", name="Save for later", pressed=True).click()
-    saved.get_by_role("button", name="Save for later").click()
+    expect(page.locator(TITLES)).to_have_count(0)  # Saved lists what is starred: no ghost row
+    page.locator("#status").get_by_role("button", name="Undo").click()
     expect(saved.locator(".btn-save")).to_have_attribute("aria-pressed", "true")
     page.reload()
     expect(page.locator(TITLES)).to_have_text(["Weekly vulnerability summary"])
@@ -783,7 +787,7 @@ def test_empty_new_view_names_its_baseline_and_points_to_unread(page, server):
     set_last_visit(page, iso(NOW))  # nothing in the sample feed arrived after this
     open_dashboard(page, server)
     page.locator('[data-view="new"]').click()
-    expect(page.get_by_text("Nothing new since your last visit, 2:00 PM")).to_be_visible()
+    expect(page.get_by_text("Nothing new since the 2:00 PM update you last saw")).to_be_visible()
     expect(page.get_by_text(f"{len(ITEMS)} unread items from earlier are still waiting.")).to_be_visible()
     page.get_by_role("button", name="Go to Unread").click()
     expect(page.locator('[data-view="unread"]')).to_have_attribute("aria-current", "true")
@@ -1077,15 +1081,14 @@ def test_removing_a_watch_term_can_be_undone_in_place(page, server):
     expect(page.locator(".chip-label")).to_have_text(["ExampleVPN", "ransomware", "ExampleOS"])  # back in its place
 
 
-def test_briefing_views_carry_their_name_and_staleness_in_the_summary(page, server):
+def test_briefing_views_carry_their_name_and_keep_the_stale_banner(page, server):
     server.write_feed(build_feed(generated_at=NOW - timedelta(hours=3)))
     open_dashboard(page, server)
     page.locator('[data-view="unread"]').click()
     expect(page.locator("#active-filters")).to_be_hidden()  # no view token: the summary names the view
-    expect(page.locator("#stale-banner")).to_be_hidden()
-    expect(page.locator(".briefing-stale")).to_contain_text("Stale: last update")
+    expect(page.locator("#stale-banner")).to_be_visible()  # a briefing is where trust matters most
     page.locator('[data-view="all"]').click()
-    expect(page.locator("#stale-banner")).to_be_visible()  # other views keep the banner
+    expect(page.locator("#stale-banner")).to_be_visible()
 
 
 def test_briefing_hits_count_opens_the_hits_in_place(page, server):
@@ -1211,26 +1214,27 @@ def test_phone_freshness_label_uses_short_ages(make_page, server):
     page = make_page(viewport=(390, 844))
     page.clock.set_fixed_time(NOW)
     open_dashboard(page, server)
-    expect(page.locator("#watch-short")).to_have_text("9m")
+    expect(page.locator("#watch-short")).to_have_text("9m ago")
 
 
 def unread_dot(page, row):
     return row.locator(".item-title").evaluate("el => getComputedStyle(el, '::before').content")
 
 
-def test_unread_dot_marks_only_older_unread_rows(page, server):
+def test_read_rows_fade_and_drop_their_new_badge_without_dots(page, server):
     set_last_visit(page, iso(NOW - timedelta(minutes=100)))
     open_dashboard(page, server)
     rows = page.locator("article.item")
     new_row = rows.filter(has=page.locator(".badge-new")).first
     older_row = rows.filter(has_not=page.locator(".badge-new")).first
-    # A NEW row is unread by definition and its badge says so; only older unread rows get the dot.
+    # Unread vs read is told by the headline's ink and weight: no per-row dot.
     assert unread_dot(page, new_row) == "none"
-    assert unread_dot(page, older_row) == '""'
-    older_row.get_by_role("button", name="Mark as read").click()
-    assert unread_dot(page, older_row) == "none"  # read: the dot goes
-    page.locator('[data-view="new"]').click()
-    assert unread_dot(page, page.locator("article.item").first) == "none"  # no dots in the New view
+    assert unread_dot(page, older_row) == "none"
+    weight = lambda row: row.locator(".item-title a").evaluate("el => getComputedStyle(el).fontWeight")
+    assert weight(new_row) == "650"
+    new_row.get_by_role("button", name="Mark as read").click()
+    expect(new_row.locator(".badge-new")).to_be_hidden()  # read: NEW goes with it
+    assert weight(new_row) == "550"
 
 
 def test_forced_colors_tell_dots_apart_by_shape(browser, server):
@@ -1276,3 +1280,60 @@ def test_phone_tab_names_the_watchlist_in_full(make_page, server):
     open_dashboard(page, server)
     expect(page.locator("#tabbar .tab-label")).to_have_text(["All", "New", "Unread", "Watchlist", "Filters"])
     assert page.evaluate("[...document.querySelectorAll('.tab-label')].every(l => l.scrollWidth <= l.parentElement.clientWidth)")
+
+
+def test_single_key_shortcuts_can_be_turned_off(page, server):
+    open_dashboard(page, server)
+    page.keyboard.press("?")
+    page.get_by_label("Single-key shortcuts").uncheck()
+    page.keyboard.press("Escape")
+    page.keyboard.press("d")
+    expect(page.locator("#feed")).to_have_attribute("data-density", "comfortable")  # WCAG 2.1.4
+    page.reload()
+    page.keyboard.press("3")
+    expect(page.locator('[data-view="all"]')).to_have_attribute("aria-current", "true")  # the choice is kept
+
+
+def test_x_marks_read_and_moves_on_and_shift_a_marks_the_view(page, server):
+    open_dashboard(page, server)
+    page.keyboard.press("j")
+    first = page.locator("article.item").first
+    page.keyboard.press("x")
+    expect(first).to_have_class(re.compile(r"\bis-read\b"))
+    expect(page.locator("article.item").nth(1).locator(".item-title a")).to_be_focused()
+    page.keyboard.press("Shift+A")
+    expect(page.locator("#status")).to_contain_text("Marked")
+    expect(page.locator("article.item:not(.is-read)")).to_have_count(0)
+
+
+def test_stale_data_does_not_claim_healthy_sources(page, server):
+    server.write_feed(build_feed(generated_at=NOW - timedelta(hours=3)))
+    open_dashboard(page, server)
+    expect(page.locator(".health-dot.is-ok")).to_have_count(0)  # unknown, not green
+    expect(page.locator(".health-dot.is-unknown").first).to_be_attached()
+    expect(page.locator("#watch-btn")).to_contain_text("at last sweep")
+    expect(page).to_have_title("Stale · Owlfeed")
+    page.locator("#watch-btn").click()
+    expect(page.locator("#watch-panel")).to_contain_text("How they are doing now is unknown")
+    page.locator("#watch-panel").get_by_role("button", name="Check now").click()
+    expect(page.locator("#status")).to_contain_text("No newer update yet")
+    expect(page.locator("#watch-panel")).to_be_visible()  # the redraw mid-click doesn't close it
+    expect(page.locator("#watch-panel").get_by_role("button", name="Check now")).to_be_focused()
+
+
+def test_mid_width_names_the_view_and_keeps_mark_read_words(make_page, server):
+    page = make_page(viewport=(800, 900))
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    expect(page.locator("#tabbar")).to_be_visible()
+    expect(page.locator('#tabbar [data-tab="all"]')).to_have_attribute("aria-current", "true")
+    expect(page.locator("#mark-all-read")).to_contain_text(re.compile(r"Mark \d+ read"))
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+
+
+def test_theme_toggle_returns_to_following_the_system(page, server):
+    open_dashboard(page, server)  # light system theme
+    page.locator("#theme-btn").click()
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+    page.locator("#theme-btn").click()
+    expect(page.locator("html")).not_to_have_attribute("data-theme", re.compile(".+"))

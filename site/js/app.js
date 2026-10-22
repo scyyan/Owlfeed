@@ -51,6 +51,9 @@ const state = {
   pending: null,
   lastFetch: 0,
   retryTimer: null,
+  arrived: new Set(), // ids that landed in a build applied while this page was open (this visit)
+  checking: false, // a "Check now" fetch is running
+  sidebarStale: null, // whether the sidebar's health dots were last drawn for stale data
 };
 if (!VIEWS.includes(state.prefs.view)) state.prefs.view = 'all';
 applyDefaultDensity();
@@ -87,6 +90,7 @@ function writeSession() {
 }
 
 function startVisit() {
+  state.arrived.clear(); // a new visit: what arrived before is now plain NEW (or seen)
   storage.invalidate('lastVisit');
   state.baseline = parseTime(storage.lastVisit()); // NaN on a first visit: set from the first data
   state.firstVisit = false;
@@ -120,8 +124,12 @@ function rememberVisit() {
 function newScope(now = Date.now()) {
   if (state.firstVisit) return 'in the 24 hours before the last update';
   const since = baselineLabel(now);
-  return since ? `since your last visit, ${since}` : 'since your last visit';
+  // The baseline is the newest update the reader had on screen, not the moment they left.
+  return since ? `since the ${since} update you last saw` : 'since your last visit';
 }
+
+/** Arrived while this page was open and not read yet: the "Just in" rows and the tab title's count. */
+const isArrived = (item) => state.arrived.has(item.id) && !storage.isRead(item.id);
 
 // A first visit has no seen-before build, and a fresh fetch "first sees" a whole week at once, so
 // there NEW means published in the last 24 hours, plus anything that arrives while the page is open.
@@ -193,6 +201,7 @@ function recomputeWatch() {
 
 function applyData(data) {
   const isUpdate = Boolean(state.data) && state.data.generated_at !== data.generated_at;
+  const previous = state.itemsById;
   state.data = data;
   state.pending = null;
   $('new-pill').hidden = true;
@@ -201,6 +210,12 @@ function applyData(data) {
   state.categories = [...new Set(state.sources.map((s) => s.category))];
   state.items = sortItems(data.items.map((raw) => enrich(raw)).filter(Boolean));
   state.itemsById = new Map(state.items.map((item) => [item.id, item]));
+  // A glance at a second screen should answer "what changed?": rows from a build that landed
+  // while the page was open are "Just in" until read.
+  if (isUpdate) {
+    for (const item of state.items) if (!previous.has(item.id)) state.arrived.add(item.id);
+  }
+  for (const id of state.arrived) if (!state.itemsById.has(id)) state.arrived.delete(id);
   if (!Number.isFinite(state.baseline)) {
     // First visit: the last day's arrivals count as NEW, so "New since last visit" isn't an empty
     // view next to hundreds of unread items. From the next visit on, the real baseline applies.
@@ -246,7 +261,7 @@ async function loadInitial() {
     else if (offline) detail = "You appear to be offline. This page will retry when it can.";
     else detail = `The latest feed couldn't be loaded (${error.message}). Retrying in a minute.`;
     $('feed').replaceChildren(
-      ui.emptyState(firstRun ? 'No feed data published yet' : "Couldn't load the feed", detail),
+      ui.emptyState(firstRun ? 'No feed data published yet' : "Couldn't load the feed", detail, { id: 'retry', label: 'Try again now' }),
     );
     $('updated').textContent = firstRun ? 'No data yet' : offline ? 'Offline' : 'Update failed';
     $('watch-short').textContent = firstRun ? '—' : offline ? 'Offline' : 'Failed';
@@ -266,30 +281,58 @@ function visibleArrivals(data) {
   return state.prefs.view === 'saved' ? [] : filterItems(fresh, filterContext());
 }
 
+/** "3 just arrived · 1 watchlist hit": what a new build brought, as the toast and pill say it. */
+function arrivalLabel(arrivals) {
+  const hits = arrivals.filter((item) => item.watch.length).length;
+  return `${arrivals.length} just arrived${hits ? ` · ${plural(hits, 'watchlist hit')}` : ''}`;
+}
+
+/** Fetch the feed again. Returns 'failed', 'same' (no newer build), 'applied' or 'held' (behind the pill). */
 async function poll() {
-  if (!state.data) return loadInitial();
+  if (!state.data) {
+    await loadInitial();
+    return state.data ? 'applied' : 'failed';
+  }
   state.lastFetch = Date.now();
   let data;
   try {
     data = await fetchFeed();
   } catch {
-    return; // keep showing what we have; the next tick tries again
+    return 'failed'; // keep showing what we have; the next tick tries again
   }
   const latest = state.pending ?? state.data;
-  if (data.generated_at === latest.generated_at) return;
-  const fresh = visibleArrivals(data).length;
-  const label = `${fresh} just arrived`;
+  if (data.generated_at === latest.generated_at) return 'same';
+  const arrivals = visibleArrivals(data);
   if (window.scrollY < AT_TOP_PX) {
     applyData(data);
-    if (fresh) announce(`${plural(fresh, 'new item')} added`);
-  } else {
-    state.pending = data;
-    renderHeader();
-    if (fresh) {
-      $('new-pill').textContent = `↑ ${label}`;
-      $('new-pill').setAttribute('aria-label', `Show ${plural(fresh, 'item')} that just arrived`);
-      $('new-pill').hidden = false;
-    }
+    if (arrivals.length) announce(arrivalLabel(arrivals));
+    return 'applied';
+  }
+  state.pending = data;
+  renderHeader();
+  if (arrivals.length) {
+    $('new-pill').textContent = `↑ ${arrivalLabel(arrivals)}`;
+    $('new-pill').setAttribute('aria-label', `Show ${plural(arrivals.length, 'item')} that just arrived`);
+    $('new-pill').hidden = false;
+  }
+  return 'held';
+}
+
+/** "Check now" in the watch report: fetch at once, and say what came back. */
+async function checkNow() {
+  if (state.checking) return;
+  state.checking = true;
+  renderWatch(freshness());
+  const result = await poll();
+  state.checking = false;
+  const fresh = freshness();
+  renderWatch(fresh);
+  if (result === 'failed') announce("Couldn't reach the feed. This page tries again on its own.");
+  else if (result === 'held') announce('A newer update is ready above the timeline');
+  else if (result === 'same' && fresh) {
+    announce(fresh.stale
+      ? `No newer update yet: the feed was last ${fresh.label.toLowerCase()}`
+      : `Up to date: ${fresh.label.toLowerCase()}`);
   }
 }
 
@@ -341,7 +384,7 @@ function visibleItems() {
 }
 
 function renderContext() {
-  return { now: Date.now(), view: state.prefs.view, matcher: state.matcher, tokens: state.tokens, isRead, isSaved, isNew };
+  return { now: Date.now(), view: state.prefs.view, matcher: state.matcher, tokens: state.tokens, isRead, isSaved, isNew, isArrived };
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────────
@@ -453,12 +496,6 @@ function briefingSummary(list, pinned) {
     return li;
   };
   const parts = [];
-  const fresh = freshness();
-  if (fresh?.stale) {
-    // The stale banner folds in here for briefings: one line, before the counts it qualifies.
-    const li = ui.el('li', 'briefing-part briefing-stale', `Stale: last update ${momentLabel(fresh.generated)}, ${updatedLabel(fresh.generated)}`);
-    parts.push(li);
-  }
   const first = part(list.length, state.prefs.view === 'new' ? 'new' : 'unread');
   if (state.prefs.view === 'new') first.firstChild.append(ui.el('span', 'briefing-scope', ` ${newScope()}`));
   parts.push(first);
@@ -675,7 +712,7 @@ function liftingFilter(view) {
   return null;
 }
 
-const PHONE_TAB_VIEWS = new Set(['all', 'new', 'unread', 'watchlist']); // the views with a tab in the phone's bottom bar
+const PHONE_TAB_VIEWS = new Set(['all', 'new', 'unread', 'watchlist']); // the views with a tab in the bottom bar (900px and under)
 const VIEW_LABELS = { all: 'All items', new: 'New since last visit', unread: 'Unread', saved: 'Saved', watchlist: 'Watchlist hits' };
 
 /**
@@ -687,7 +724,7 @@ function activeFilterParts() {
   const parts = [];
   // Briefing views name themselves in their summary line (and the sidebar), so no view token there.
   // On phones a view with a tab in the bottom bar is named there, so it gets no token of its own.
-  const namedByTab = phone.matches && PHONE_TAB_VIEWS.has(state.prefs.view);
+  const namedByTab = narrow.matches && PHONE_TAB_VIEWS.has(state.prefs.view);
   if (state.prefs.view !== 'all' && !BRIEFING_VIEWS.has(state.prefs.view) && !namedByTab) parts.push({ id: 'view', label: VIEW_LABELS[state.prefs.view] });
   if (state.prefs.view === 'watchlist' && state.watchTerm) parts.push({ id: 'term', label: `Term: ${state.watchTerm}` });
   const hiddenCats = state.categories.filter((c) => state.prefs.hiddenCategories.includes(c));
@@ -834,12 +871,12 @@ function freshness(now = Date.now()) {
   };
 }
 
-/** "now", "9m", "3h", "2d": the phone-width freshness label. */
+/** "just now", "9m ago", "3h ago", "2d ago": the narrow-screen freshness label (it says what the number is). */
 function shortAge(ms) {
-  if (ms < MINUTE) return 'now';
-  if (ms < HOUR) return `${Math.floor(ms / MINUTE)}m`;
-  if (ms < DAY) return `${Math.floor(ms / HOUR)}h`;
-  return `${Math.floor(ms / DAY)}d`;
+  if (ms < MINUTE) return 'just now';
+  if (ms < HOUR) return `${Math.floor(ms / MINUTE)}m ago`;
+  if (ms < DAY) return `${Math.floor(ms / HOUR)}h ago`;
+  return `${Math.floor(ms / DAY)}d ago`;
 }
 
 /** The top bar's watch status: owl eyes, freshness and source health, at every screen size. */
@@ -856,10 +893,12 @@ function renderWatch(fresh, now = Date.now()) {
   $('updated').classList.toggle('is-stale', fresh.stale);
   $('watch-short').textContent = fresh.short;
   $('watch-sources').textContent = total ? `${ok}/${total}` : '';
+  // Stale: the tally is what answered at the last sweep, not a health reading for now.
+  button.querySelector('.watch-unit').textContent = fresh.stale ? ' at last sweep' : ' sources';
   const flag = { aging: 'Late', stale: 'Stale' }[watchState] ?? '';
   $('watch-flag').textContent = flag;
   $('watch-flag').hidden = !flag;
-  const sourcesText = total ? `, ${ok} of ${total} sources OK` : '';
+  const sourcesText = total ? `, ${ok} of ${total} sources ${fresh.stale ? 'answered at the last sweep' : 'OK'}` : '';
   const stateText = { aging: 'running late, ', stale: 'stale, ' }[watchState] ?? '';
   button.setAttribute('aria-label', `Feed status: ${stateText}${fresh.label.toLowerCase()}${sourcesText}`);
   button.title = fresh.stale
@@ -871,9 +910,12 @@ function renderWatch(fresh, now = Date.now()) {
 function renderWatchPanel(fresh = freshness(), failing = state.sources.filter((s) => s.status !== 'ok'), now = Date.now()) {
   if (!fresh) return;
   const panel = $('watch-panel');
+  const hadFocus = panel.contains(document.activeElement) ? document.activeElement.dataset.checkNow != null : false;
+  const answered = `${state.sources.length - failing.length} of ${state.sources.length} answered`;
   const rows = [
     ['Last sweep', `${new Date(fresh.generated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · ${updatedLabel(fresh.generated, now)}`],
-    ['Sources', `${state.sources.length - failing.length} of ${state.sources.length} answered`],
+    // Stale: that answer is old news. Say so instead of implying the sources are healthy now.
+    ['Sources', fresh.stale ? `${answered} at that sweep. How they are doing now is unknown.` : answered],
     ['Schedule', 'The feed refreshes about every 15 minutes; this page checks every 5.'],
   ];
   const list = ui.el('dl', 'watch-rows');
@@ -892,19 +934,28 @@ function renderWatchPanel(fresh = freshness(), failing = state.sources.filter((s
     }
     nodes.push(ui.el('p', 'watch-failing-title', `${failing.length} not answering`), failingList);
   }
+  // Fetch now instead of waiting for the next 5-minute check: right under the status it acts on.
+  const check = ui.el('button', 'btn btn-small watch-check', state.checking ? 'Checking…' : 'Check now');
+  check.type = 'button';
+  check.dataset.checkNow = '';
+  // aria-disabled, not disabled: a disabled button drops keyboard focus mid-check. checkNow ignores repeats.
+  check.setAttribute('aria-disabled', String(state.checking));
+  nodes.push(ui.el('div', 'watch-actions'));
+  nodes.at(-1).append(check);
   // The status vocabulary, spelled out once where people look for it.
   const legend = ui.el('dl', 'watch-legend');
   for (const [term, detail] of [
     ['Eyes open', 'Fresh: refreshed in the last 30 minutes.'],
     ['Late', '30–60 minutes since the last refresh (it normally runs every 15). Items are still recent.'],
     ['Stale', 'Over an hour since the last refresh. Newer reporting may be missing.'],
-    ['31/31', 'Sources that answered on the last refresh. A rust dot marks one that did not.'],
+    ['31/31', 'Sources that answered on the last refresh. A rust dot marks one that did not; a hollow ring means no refresh for over an hour, so its state is unknown.'],
   ]) {
     legend.append(ui.el('dt', null, term === '31/31' ? `${state.sources.length - failing.length}/${state.sources.length}` : term), ui.el('dd', null, detail));
   }
   nodes.push(legend);
   if (fresh.stale || fresh.aging) nodes.push(ownerHint());
   panel.replaceChildren(...nodes);
+  if (hadFocus) check.focus({ preventScroll: true }); // the panel redraws every 30 seconds
 }
 
 /**
@@ -998,12 +1049,16 @@ function renderSidebar() {
   const matching = state.tokens.length ? state.items.filter((item) => matchesQuery(item.searchText, state.tokens)) : state.items;
   const categoryCounts = countBy(matching.filter((item) => !hiddenSources.has(item.source)), 'category');
   ui.renderCategories($('category-list'), state.categories, new Set(state.prefs.hiddenCategories), categoryCounts, sourceState, countBy(matching, 'category'));
+  // Stale data: the health dots can't say how a source is doing now, so they turn hollow.
+  const fresh = freshness(now);
+  state.sidebarStale = Boolean(fresh?.stale);
   ui.renderSources($('source-list'), state.sources, {
     hiddenSources: new Set(state.prefs.hiddenSources),
     hiddenCategories: new Set(state.prefs.hiddenCategories),
     counts: countBy(matching, 'source'),
     now,
     openGroups,
+    staleSince: fresh?.stale ? fresh.generated : null,
   });
   $('sources-reset').hidden = !state.prefs.hiddenSources.length;
   // Each term's hits in the current view (New, Unread...), filters and search, so a chip agrees with
@@ -1015,7 +1070,25 @@ function renderSidebar() {
   ui.renderWatchTerms($('watch-terms'), state.terms, termCounts, activeTerm);
   ui.renderWatchUpgrades($('watch-upgrades'), termUpgrades(termCounts, pool), state.upgradesOpen);
   updateMarkAll();
+  updateTitle();
   restoreFocus(focused);
+}
+
+/**
+ * The browser tab answers a glance from another tab or screen: "(3) Owlfeed" counts unread rows
+ * that arrived while the page was open (", 1 hit" when any are watchlist hits), and stale data
+ * says so first.
+ */
+function updateTitle() {
+  const fresh = freshness();
+  const arrived = filterItems(
+    state.items.filter(isArrived),
+    filterContext('all', [], { watchTerm: null }),
+  );
+  const hits = arrived.filter((item) => item.watch.length).length;
+  const count = arrived.length ? `(${arrived.length}${hits ? `, ${plural(hits, 'hit')}` : ''}) ` : '';
+  const title = `${count}${fresh?.stale ? 'Stale · ' : ''}Owlfeed`;
+  if (document.title !== title) document.title = title;
 }
 
 function renderHeader() {
@@ -1024,8 +1097,8 @@ function renderHeader() {
   if (fresh) {
     // Written for readers: what they can rely on. The owner's fix lives in the watch report.
     const latest = (state.pending ?? state.data)?.generated_at;
-    // Briefing views carry the stale state in their summary line instead of a banner.
-    $('stale-banner').hidden = !fresh.stale || staleHiddenFor() === latest || BRIEFING_VIEWS.has(state.prefs.view);
+    // Every view keeps the banner: a briefing is where the reader decides what to trust.
+    $('stale-banner').hidden = !fresh.stale || staleHiddenFor() === latest;
     const message = fresh.stale
       ? `This feed was last ${fresh.label.toLowerCase()} (${momentLabel(fresh.generated)}). Newer reporting may be missing.`
       : '';
@@ -1035,6 +1108,9 @@ function renderHeader() {
     // The chip beside the search already says how old the data is ("STALE 3d"): the phone banner
     // adds only what that means.
     $('stale-short').textContent = fresh.stale ? 'Newer reports may be missing.' : '';
+    // Turning stale (or fresh again) changes what the sidebar's health dots can claim.
+    if (state.sidebarStale !== null && state.sidebarStale !== fresh.stale) renderSidebar();
+    updateTitle();
   }
 }
 
@@ -1288,9 +1364,22 @@ function syncThemeButton() {
 
 function toggleTheme() {
   const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = next;
-  storage.setTheme(next);
+  const system = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  // Toggling back to what the system shows drops the override, so the page follows the system again.
+  if (next === system) {
+    delete document.documentElement.dataset.theme;
+    storage.setTheme(null);
+  } else {
+    document.documentElement.dataset.theme = next;
+    storage.setTheme(next);
+  }
   syncThemeButton();
+}
+
+/** The help dialog's switch, and a quiet hint on the list it controls. */
+function syncShortcuts() {
+  $('shortcuts-toggle').checked = state.prefs.shortcuts;
+  $('help').classList.toggle('shortcuts-off', !state.prefs.shortcuts);
 }
 
 // ── Density ─────────────────────────────────────────────────────────────────
@@ -1392,6 +1481,7 @@ function reloadFromStorage({ keepView = false } = {}) {
   state.terms = storage.watchlist();
   recomputeWatch();
   syncDensity();
+  syncShortcuts();
   renderAll();
 }
 
@@ -1609,6 +1699,12 @@ function wireEvents() {
       return;
     }
     const emptyAction = event.target.closest('[data-empty-action]')?.dataset.emptyAction;
+    if (emptyAction === 'retry') {
+      event.target.closest('button').disabled = true;
+      $('feed').setAttribute('aria-busy', 'true');
+      loadInitial().then(() => (state.data ? focusFirstItem() : $('feed').querySelector('[data-empty-action]')?.focus()));
+      return;
+    }
     if (emptyAction === 'suggest' && state.suggestion) {
       applySuggestion();
       return;
@@ -1650,7 +1746,18 @@ function wireEvents() {
     const action = event.target.closest('[data-action]')?.dataset.action;
     if (action === 'save') {
       toggleSaved(id);
-      speak(storage.isSaved(id) ? 'Saved' : 'Removed from saved');
+      if (state.prefs.view === 'saved' && !storage.isSaved(id)) {
+        // Saved lists what is starred: the row goes now (not on the next render), with Undo.
+        renderAll();
+        announce('Removed from Saved', {
+          label: 'Undo',
+          run() {
+            toggleSaved(id);
+            renderAll();
+            announce('Back in Saved');
+          },
+        });
+      } else speak(storage.isSaved(id) ? 'Saved' : 'Removed from saved');
     }
     if (action === 'read') {
       const read = !storage.isRead(id);
@@ -1701,8 +1808,20 @@ function wireEvents() {
   for (const button of document.querySelectorAll('[data-theme-toggle]')) button.addEventListener('click', toggleTheme);
   for (const button of document.querySelectorAll('[data-density-toggle]')) button.addEventListener('click', toggleDensity);
   $('watch-btn').addEventListener('click', () => setWatchPanel($('watch-panel').hidden));
+  $('watch-panel').addEventListener('click', (event) => {
+    if (event.target.closest('[data-check-now]')) checkNow();
+  });
+  $('shortcuts-toggle').addEventListener('change', (event) => {
+    state.prefs.shortcuts = event.target.checked;
+    savePrefs();
+    syncShortcuts();
+    speak(state.prefs.shortcuts ? 'Single-key shortcuts on' : 'Single-key shortcuts off');
+  });
+  // Following the system: when it switches between light and dark, the toggle's label follows.
+  window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', syncThemeButton);
   document.addEventListener('click', (event) => {
-    if (!$('watch-panel').hidden && !event.target.closest('#watch')) setWatchPanel(false);
+    // composedPath, not closest(): a control the panel redrew mid-click is detached by now.
+    if (!$('watch-panel').hidden && !event.composedPath().includes($('watch'))) setWatchPanel(false);
   });
   $('new-pill').addEventListener('click', () => {
     applyPending();
@@ -1726,6 +1845,7 @@ function wireEvents() {
   narrow.addEventListener('change', () => {
     if (!narrow.matches) closeDrawer({ returnFocus: false });
     syncDrawer();
+    if (state.data) renderAll(); // the view token appears or goes with the tab bar
   });
 
   $('skip-link').addEventListener('click', (event) => {
@@ -1750,7 +1870,7 @@ function wireEvents() {
       event.preventDefault();
       return;
     }
-    if (event.key === '/' && !typing) {
+    if (event.key === '/' && !typing && state.prefs.shortcuts) {
       event.preventDefault();
       $('search').focus();
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && toastAction && !typing) {
@@ -1842,11 +1962,28 @@ function openHelp() {
   if (!$('help').open) $('help').showModal();
 }
 
-/** j/k/o/s/m/?: returns true when the key was handled. */
+/**
+ * j/k/o/s/m/x/?, 1–5, d, n and Shift+A: returns true when the key was handled. All of them are
+ * single characters, so they can be turned off (WCAG 2.1.4): speech input types words, and a
+ * stray "d" or "3" must not change the page.
+ */
 function handleShortcut(event) {
   if (event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (!state.prefs.shortcuts) return false;
   if ($('help').open || document.body.classList.contains('drawer-open')) return false;
   const key = event.key;
+  if (key === 'A' && event.shiftKey) {
+    markAllRead(); // scoped to this view, with Undo in the toast
+    return true;
+  }
+  if (key === 'x') {
+    // Mark this row read and move on: one key per item for a briefing.
+    const article = currentArticle();
+    if (!article) return false;
+    if (!storage.isRead(article.dataset.id)) markRead([article.dataset.id]);
+    moveItem(1);
+    return true;
+  }
   if (key === '?') {
     openHelp();
     return true;
@@ -1903,9 +2040,12 @@ initVisit();
 storage.pruneRead();
 syncThemeButton();
 syncDensity();
+syncShortcuts();
 syncDrawer();
 // Name the modifier Mac users actually press (Cmd+Z works everywhere it says Ctrl+Z).
-if (/Mac|iPhone|iPad/.test(navigator.userAgentData?.platform ?? navigator.platform ?? '')) $('undo-mod').textContent = '⌘';
+if (/Mac|iPhone|iPad/.test(navigator.userAgentData?.platform ?? navigator.platform ?? '')) {
+  for (const id of ['undo-mod', 'undo-mod-2']) $(id).textContent = '⌘';
+}
 syncSearchPlaceholder();
 phone.addEventListener('change', () => {
   syncSearchPlaceholder();
