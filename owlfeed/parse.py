@@ -133,7 +133,10 @@ def parse_loose_date(text: str, tz: tzinfo = timezone.utc) -> datetime | None:
             moment = datetime.strptime(text, fmt)
         except ValueError:
             continue
-        return moment.replace(tzinfo=tz, microsecond=0).astimezone(timezone.utc)
+        try:
+            return moment.replace(tzinfo=tz, microsecond=0).astimezone(timezone.utc)
+        except (OverflowError, ValueError):
+            return None  # e.g. .NET's "0001-01-01T00:00:00" placeholder east of UTC
     return None
 
 
@@ -180,6 +183,68 @@ def _entry(raw: dict, base: str, source: Source, settings: Settings, now: dateti
     return Entry(item_id(url), url, title, summary, entry_published(raw, now, source.tz))
 
 
+# A numeric character reference, also in its escaped-HTML form (&amp;#...;).
+_CHARREF = re.compile(rb"&(amp;)?#(?:[xX]([0-9a-fA-F]+)|([0-9]+));")
+_MAX_CODE_POINT = 0x10FFFF
+
+
+def _charref_code(match: re.Match) -> int:
+    """The code point a reference names, or -1 when it is too long to be one."""
+    hex_digits, decimal = match.group(2), match.group(3)
+    digits = hex_digits or decimal
+    if len(digits.lstrip(b"0")) > 8:
+        return -1
+    return int(digits, 16 if hex_digits else 10)
+
+
+def _invalid_code(code: int) -> bool:
+    return code < 0 or code > _MAX_CODE_POINT or 0xD800 <= code <= 0xDFFF
+
+
+def fix_charrefs(content: bytes) -> bytes:
+    """Repair numeric character references that feedparser crashes on (and so fails the whole feed).
+
+    Older Java and .NET escapers write an emoji as a UTF-16 surrogate pair, "&#55357;&#56960;":
+    such a pair becomes one reference to the real code point. A lone surrogate, or a number past
+    U+10FFFF, becomes U+FFFD. Valid references are left exactly as they are.
+    """
+    if b"#" not in content:
+        return content
+    matches = list(_CHARREF.finditer(content))
+    out: list[bytes] = []
+    pos = i = 0
+    while i < len(matches):
+        match = matches[i]
+        code = _charref_code(match)
+        if not _invalid_code(code):
+            i += 1
+            continue
+        prefix = match.group(1) or b""
+        end = match.end()
+        following = matches[i + 1] if i + 1 < len(matches) else None
+        low = _charref_code(following) if following else -1
+        if (
+            0xD800 <= code <= 0xDBFF
+            and following is not None
+            and following.start() == end
+            and (following.group(1) or b"") == prefix
+            and 0xDC00 <= low <= 0xDFFF
+        ):
+            code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)
+            end = following.end()
+            i += 2
+        else:
+            code = 0xFFFD
+            i += 1
+        out.append(content[pos : match.start()])
+        out.append(b"&" + prefix + b"#x%X;" % code)
+        pos = end
+    if not out:
+        return content
+    out.append(content[pos:])
+    return b"".join(out)
+
+
 def parse_feed(
     content: bytes,
     source: Source,
@@ -190,7 +255,7 @@ def parse_feed(
     """Parse feed bytes into the newest entries (at most settings.max_items_per_source)."""
     headers = {"content-type": content_type} if content_type else {}
     # Always hand feedparser a stream: given raw bytes it first tries to open them as a local file path.
-    parsed = feedparser.parse(io.BytesIO(content), response_headers=headers)
+    parsed = feedparser.parse(io.BytesIO(fix_charrefs(content)), response_headers=headers)
     if not parsed.entries:
         if not parsed.get("version"):
             problem = parsed.get("bozo_exception")
@@ -208,8 +273,8 @@ def parse_feed(
     for raw in parsed.entries:
         try:
             entry = _entry(raw, base, source, settings, now)
-        except ValueError:
-            continue  # e.g. a malformed URL; one bad entry must not sink the whole feed
+        except (ValueError, OverflowError):
+            continue  # e.g. a malformed URL or date; one bad entry must not sink the whole feed
         if entry is None or entry.id in seen:
             continue
         seen.add(entry.id)

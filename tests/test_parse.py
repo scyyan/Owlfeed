@@ -132,6 +132,54 @@ def test_one_malformed_entry_does_not_sink_the_feed():
     assert [e.title for e in parse_feed(feed, make_source("m"), Settings(), NOW)] == ["Fine"]
 
 
+def _five_good_and(bad_item: bytes) -> bytes:
+    good = b"".join(
+        b"<item><title>Good %d</title><link>https://m.example/%d</link>"
+        b"<pubDate>Wed, 14 Oct 2026 1%d:00:00 GMT</pubDate></item>" % (i, i, i)
+        for i in range(5)
+    )
+    return (
+        b'<?xml version="1.0"?><rss version="2.0"><channel><title>M</title><link>https://m.example/</link>'
+        + good + bad_item + b"</channel></rss>"
+    )
+
+
+@pytest.mark.parametrize(
+    "title, expected",
+    [
+        (b"Rocket &#55357;&#56960; launch", "Rocket \U0001F680 launch"),  # UTF-16 surrogate pair
+        (b"Rocket &#xD83D;&#xDE80; launch", "Rocket \U0001F680 launch"),
+        (b"Lone &#55357; surrogate", "Lone � surrogate"),
+        (b"Too big &#x110000; here", "Too big � here"),
+        (b"Way too big &#99999999999999999999; here", "Way too big � here"),
+        (b"Valid &#233;t&#xE9; stays", "Valid été stays"),
+    ],
+)
+def test_bad_character_references_do_not_sink_the_feed(title, expected):
+    bad = b"<item><title>%s</title><link>https://m.example/bad</link></item>" % title
+    entries = parse_feed(_five_good_and(bad), make_source("m"), Settings(), NOW)
+    assert len(entries) == 6
+    assert by_title(entries)[expected].url == "https://m.example/bad"
+
+
+def test_escaped_surrogate_pairs_in_descriptions_are_repaired():
+    bad = (
+        b"<item><title>Emoji</title><link>https://m.example/bad</link>"
+        b"<description>&lt;p&gt;Launch &amp;#55357;&amp;#56960; went well today.&lt;/p&gt;</description></item>"
+    )
+    entries = by_title(parse_feed(_five_good_and(bad), make_source("m"), Settings(), NOW))
+    assert len(entries) == 6
+    assert entries["Emoji"].summary == "Launch \U0001F680 went well today."
+
+
+@pytest.mark.parametrize("date", [b"0001-01-01T00:00:00", b"Mon, 01 Jan 0001 00:00:00 CEST"])
+def test_out_of_range_dates_do_not_sink_the_feed(date):
+    bad = b"<item><title>Placeholder date</title><link>https://m.example/bad</link><pubDate>%s</pubDate></item>" % date
+    entries = by_title(parse_feed(_five_good_and(bad), make_source("m", timezone="Europe/Brussels"), Settings(), NOW))
+    assert len(entries) == 6
+    assert entries["Placeholder date"].published is None
+
+
 def test_zone_less_dates_use_the_source_timezone():
     feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Z</title><link>https://z.example/</link>
     <item><title>ISO</title><link>https://z.example/a</link><pubDate>2026-10-12T21:44:00</pubDate></item>
