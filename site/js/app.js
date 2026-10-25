@@ -241,32 +241,28 @@ function applyData(data) {
 }
 
 async function fetchFeed() {
-  // A request that hangs must not hold up every later check (or overlap the next one).
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  // A request that hangs must not hold up every later check (or overlap the next one). The
+  // timeout runs on real elapsed time, not page timers.
+  const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  let response;
   try {
-    let response;
-    try {
-      response = await fetch(`${FEED_URL}?t=${Date.now()}`, { cache: 'no-store', signal: controller.signal });
-    } catch (error) {
-      throw controller.signal.aborted ? new Error('the request timed out') : error;
-    }
-    if (!response.ok) {
-      const error = new Error(`HTTP ${response.status}`);
-      error.status = response.status;
-      throw error;
-    }
-    let data;
-    try {
-      data = await response.json();
-    } catch {
-      throw new Error(controller.signal.aborted ? 'the request timed out' : 'the feed file is damaged');
-    }
-    if (!data || data.version !== 1 || !Array.isArray(data.items)) throw new Error('the feed file is in an unknown format');
-    return data;
-  } finally {
-    clearTimeout(timer);
+    response = await fetch(`${FEED_URL}?t=${Date.now()}`, { cache: 'no-store', signal });
+  } catch (error) {
+    throw signal.aborted ? new Error('the request timed out') : error;
   }
+  if (!response.ok) {
+    const error = new Error(`HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(signal.aborted ? 'the request timed out' : 'the feed file is damaged');
+  }
+  if (!data || data.version !== 1 || !Array.isArray(data.items)) throw new Error('the feed file is in an unknown format');
+  return data;
 }
 
 /** Whether build `data` is newer than build `than` (by generated_at; unreadable dates: just different). */
