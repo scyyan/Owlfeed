@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { createStorage } from '../../site/js/storage.js';
+import { MAX_TERMS } from '../../site/js/watchlist.js';
 
 class MemoryBackend {
   constructor() {
@@ -173,4 +174,30 @@ test('imported watchlist terms are cleaned up and de-duplicated', () => {
   const result = target.importData({ app: 'owlfeed', watchlist: ['  Lazarus   Group ', 'lazarus group', '***', 'apt28', 'Russia **'] });
   assert.equal(result.terms, 2);
   assert.deepEqual(target.watchlist(), ['APT28', 'Lazarus Group', 'Russia*']);
+});
+
+test('a restore cannot push the watchlist past its cap', () => {
+  const target = createStorage(new MemoryBackend());
+  target.setWatchlist(['APT28']);
+  const huge = Array.from({ length: 40_000 }, (_, i) => `w${i}`);
+  const result = target.importData({ app: 'owlfeed', watchlist: huge });
+  assert.equal(result.terms, MAX_TERMS - 1);
+  assert.equal(target.watchlist().length, MAX_TERMS);
+});
+
+test('an oversized or untidy stored watchlist is cleaned when read', () => {
+  const backend = new MemoryBackend();
+  backend.setItem('owlfeed:v1:watchlist', JSON.stringify(['  Lazarus  ', 'lazarus', ...Array.from({ length: 500 }, (_, i) => `w${i}`)]));
+  const terms = createStorage(backend).watchlist();
+  assert.equal(terms.length, MAX_TERMS);
+  assert.equal(terms[0], 'Lazarus');
+});
+
+test('damaged saved entries are skipped instead of breaking the app', () => {
+  const backend = new MemoryBackend();
+  backend.setItem('owlfeed:v1:saved', JSON.stringify({ a: null, b: 'x', c: [1], a1: SNAPSHOT }));
+  const store = createStorage(backend);
+  assert.deepEqual(store.savedItems().map((s) => s.id), ['a1']);
+  assert.equal(store.isSaved('a'), false);
+  assert.equal(store.isSaved('a1'), true);
 });

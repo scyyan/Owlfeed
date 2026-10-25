@@ -2,11 +2,16 @@
 
 export const VIEWS = ['all', 'new', 'unread', 'saved', 'watchlist'];
 
-/** Lowercase and strip accents so "Zelenskyy" finds "Zelenskyy" and "café" finds "cafe". */
+/**
+ * Lowercase, strip accents and straighten curly quotes, so "cafe" finds "Café" and "Yemen's"
+ * finds "Yemen’s". Quotes map one-to-one, so queryRanges' offsets stay right.
+ */
 export function fold(text) {
   return String(text ?? '')
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
+    .replace(/[‘’ʼ′]/g, "'")
+    .replace(/[“”″]/g, '"')
     .toLowerCase();
 }
 

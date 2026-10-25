@@ -34,6 +34,13 @@ test('fold strips accents and case', () => {
   assert.equal(fold('Café ZELENSKYY'), 'cafe zelenskyy');
 });
 
+test('curly quotes fold to straight ones, keeping offsets', () => {
+  assert.equal(fold('Yemen’s “ports”'), 'yemen\'s "ports"');
+  assert.equal(matchesQuery(fold('Yemen’s ports'), parseQuery("Yemen's")), true);
+  assert.equal(matchesQuery(fold("Yemen's ports"), parseQuery('Yemen’s')), true);
+  assert.deepEqual(queryRanges('The People’s Army', parseQuery("people's")), [[4, 12]]);
+});
+
 test('parseQuery keeps quoted phrases', () => {
   assert.deepEqual(parseQuery('  "Volt Typhoon"  cisa '), ['volt typhoon', 'cisa']);
   assert.deepEqual(parseQuery(''), []);

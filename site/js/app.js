@@ -4,7 +4,7 @@ import { filterItems, fold, matchesQuery, parseQuery, prefixSuggestion, sortItem
 import * as ui from './render.js';
 import { createStorage, DENSITIES } from './storage.js';
 import { clockTime, DAY, dayKey, HOUR, MINUTE, momentLabel, parseTime, updatedLabel } from './time.js';
-import { addTerm, buildMatcher, normalizeTerm, removeTerm } from './watchlist.js';
+import { addTerm, buildMatcher, MAX_TERMS, normalizeTerm, removeTerm } from './watchlist.js';
 
 const FEED_URL = 'data/feed.json';
 const POLL_MS = 5 * 60_000;
@@ -424,6 +424,9 @@ function renderFeed() {
   if (!state.data) return;
   const focus = feedFocusKey();
   const list = visibleItems();
+  // Redrawing the view on screen (another tab's change, a new build): keep as many rows as the
+  // reader had, so their place and focus survive. A different view starts at the top.
+  const minCount = $('feed').dataset.showing === state.prefs.view ? feedRenderer.rendered : 0;
   $('feed').dataset.showing = state.prefs.view;
   renderActiveFilters(list.length);
   updateMarkAll(list);
@@ -453,9 +456,10 @@ function renderFeed() {
       pinnedFooter: hits.length > PINNED_LIMIT ? pinnedToggle(hits.length) : null,
       lead: briefingSummary(list, hits),
       end: caughtUpNote(list),
+      minCount,
     });
   } else {
-    feedRenderer.render(list, renderContext());
+    feedRenderer.render(list, renderContext(), { minCount });
   }
   restoreFeedFocus(focus);
 }
@@ -1485,13 +1489,38 @@ function reloadFromStorage({ keepView = false } = {}) {
   renderAll();
 }
 
+/**
+ * Another tab saved its prefs. This tab keeps its own view, so the feed is only rebuilt (which
+ * restarts it at the top) when the shared filters changed; density and shortcuts apply in place.
+ */
+function applyStoredPrefs() {
+  const before = state.prefs;
+  const stored = storage.prefs();
+  const sameList = (a, b) => a.length === b.length && a.every((value, i) => value === b[i]);
+  if (!sameList(before.hiddenCategories, stored.hiddenCategories) || !sameList(before.hiddenSources, stored.hiddenSources)) {
+    reloadFromStorage({ keepView: true });
+    return;
+  }
+  state.prefs = { ...stored, view: before.view };
+  applyDefaultDensity();
+  syncDensity();
+  syncShortcuts();
+}
+
 async function importSettings(file) {
+  let data;
   try {
-    const result = storage.importData(JSON.parse(await file.text()));
+    data = JSON.parse(await file.text());
+  } catch {
+    announce("Couldn't restore: the file is not valid JSON");
+    return;
+  }
+  try {
+    const result = storage.importData(data);
     reloadFromStorage();
     announce(`Restored: ${plural(result.saved, 'saved item')} and ${plural(result.terms, 'watchlist term')} added`);
   } catch (error) {
-    announce(`Couldn't restore: ${error instanceof SyntaxError ? 'the file is not valid JSON' : error.message}`);
+    announce(`Couldn't restore: ${error.message}`);
   }
 }
 
@@ -1612,6 +1641,8 @@ function wireEvents() {
         chip?.classList.add('is-flash');
         speak(`${existing} is already on your watchlist`);
         input.select();
+      } else if (normalizeTerm(term) && state.terms.length >= MAX_TERMS) {
+        speak(`Your watchlist is full (${MAX_TERMS} terms). Remove one to add another.`);
       }
       return;
     }
@@ -1918,7 +1949,7 @@ function wireEvents() {
   // save cannot write its stale copy over them.
   storage.listen((key) => {
     if (!state.data) return;
-    if (key === 'prefs') reloadFromStorage({ keepView: true });
+    if (key === 'prefs') applyStoredPrefs();
     else if (key === null || key === 'watchlist') {
       state.terms = storage.watchlist();
       recomputeWatch();

@@ -1,5 +1,6 @@
 """End-to-end checks of the dashboard in a real browser, against a fixed clock and sample feed."""
 
+import json
 import re
 from datetime import timedelta
 
@@ -7,6 +8,9 @@ from playwright.sync_api import expect
 
 from .conftest import set_last_visit
 from .sample_data import ITEMS, NOW, breaking_item, build_feed, iso
+from .sample_data import item as sample_item
+
+MAX_TERMS = 200  # site/js/watchlist.js
 
 TITLES = "article.item .item-title"
 
@@ -1337,3 +1341,56 @@ def test_theme_toggle_returns_to_following_the_system(page, server):
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
     page.locator("#theme-btn").click()
     expect(page.locator("html")).not_to_have_attribute("data-theme", re.compile(".+"))
+
+
+def many_items(count):
+    return [
+        sample_item(f"m{i}", "sample-news", f"Filler story number {i}", "A filler summary for a long feed.", 60 + i, 60 + i)
+        for i in range(count)
+    ]
+
+
+def test_another_tabs_view_change_keeps_this_tabs_place(make_page, server):
+    server.write_feed(build_feed(extra_items=many_items(150)))
+    tab_a = make_page()
+    tab_a.clock.set_fixed_time(NOW)
+    open_dashboard(tab_a, server)
+    for _ in range(10):  # scroll until the second page of rows is drawn
+        tab_a.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        if tab_a.locator("article.item").count() > 120:
+            break
+        tab_a.wait_for_timeout(100)
+    target = tab_a.locator("article.item").nth(120)
+    target_id = target.get_attribute("data-id")
+    target.locator(".item-title a").focus()
+
+    tab_b = tab_a.context.new_page()
+    tab_b.clock.set_fixed_time(NOW)
+    open_dashboard(tab_b, server)
+    tab_b.locator('[data-view="unread"]').first.click()
+    wait_until(tab_b, "localStorage.getItem('owlfeed:v1:prefs')?.includes('unread')")
+
+    tab_a.wait_for_timeout(300)
+    assert tab_a.evaluate("document.activeElement.closest('article')?.dataset.id") == target_id
+    assert tab_a.locator("article.item").count() > 120
+
+
+def test_a_damaged_saved_entry_does_not_stop_the_app(page, server):
+    page.add_init_script(
+        "localStorage.setItem('owlfeed:v1:saved', JSON.stringify({ broken: null, junk: 'x' }));"
+    )
+    open_dashboard(page, server)
+    expect(page.locator('[data-view="saved"] .count')).to_have_text("0")
+    assert page.js_errors == []
+
+
+def test_a_huge_watchlist_backup_is_capped_and_the_app_keeps_working(page, server, tmp_path):
+    open_dashboard(page, server)
+    backup = tmp_path / "huge.json"
+    backup.write_text(json.dumps({"app": "owlfeed", "watchlist": [f"w{i}" for i in range(40_000)]}), encoding="utf-8")
+    page.locator("#import-input").set_input_files(str(backup))
+    expect(page.locator("#status")).to_contain_text(f"{MAX_TERMS} watchlist terms added")
+    page.reload()
+    expect(page.locator("article.item").first).to_be_visible()
+    expect(page.locator(".chip-label")).to_have_count(MAX_TERMS)
+    assert page.js_errors == []

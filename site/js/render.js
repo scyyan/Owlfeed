@@ -251,9 +251,10 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
      * options.pinned: items shown first under their own header (watchlist hits in a briefing),
      * with pinnedDetail beside the header and pinnedFooter (a Show all toggle) after them;
      * options.lead: a node above everything (the briefing summary); options.end: a node after the
-     * last item (the caught-up marker).
+     * last item (the caught-up marker); options.minCount: draw at least this many rows at once, so
+     * redrawing a list the reader had scrolled down keeps their place and focus.
      */
-    render(list, context, { pinned = [], pinnedDetail = '', pinnedFooter = null, lead = null, end = null } = {}) {
+    render(list, context, { pinned = [], pinnedDetail = '', pinnedFooter = null, lead = null, end = null, minCount = 0 } = {}) {
       entries = list;
       ctx = context;
       index = 0;
@@ -268,10 +269,15 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
         if (pinnedFooter) hits.append(pinnedFooter);
         container.append(hits);
       }
-      renderMore();
+      do renderMore();
+      while (ctx && index < Math.min(minCount, entries.length));
     },
     get size() {
       return entries.length;
+    },
+    /** How many rows of the list are on the page. */
+    get rendered() {
+      return index;
     },
   };
 }

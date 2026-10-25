@@ -6,7 +6,7 @@
 // writing (read-modify-write) instead of writing back a possibly stale in-memory copy, and
 // other tabs' changes arrive through the browser's "storage" event (see listen()).
 
-import { normalizeTerm } from './watchlist.js';
+import { cleanTerms, MAX_TERMS, normalizeTerm } from './watchlist.js';
 
 const PREFIX = 'owlfeed:v1:';
 const READ_TTL_DAYS = 30;
@@ -142,8 +142,12 @@ export function createStorage(backend = defaultBackend()) {
       );
     },
 
-    isSaved: (id) => Object.hasOwn(savedMap(), id),
-    savedItems: () => Object.values(savedMap()),
+    isSaved(id) {
+      const saved = savedMap();
+      return Object.hasOwn(saved, id) && cleanSnapshot(saved[id]) !== null;
+    },
+    // Validated on read too: a damaged entry (devtools, another page on this origin) must not break the app.
+    savedItems: () => Object.values(savedMap()).map(cleanSnapshot).filter(Boolean),
     setSaved(snapshot, saved = true) {
       const clean = saved ? cleanSnapshot(snapshot) : null;
       if (saved && !clean) return false;
@@ -156,11 +160,12 @@ export function createStorage(backend = defaultBackend()) {
       return true;
     },
 
-    watchlist: () => stringList(load('watchlist', [])),
+    // Cleaned on read, so older stored lists (untidy, duplicated or oversized) still work.
+    watchlist: () => cleanTerms(stringList(load('watchlist', []))),
     setWatchlist: (terms) => save('watchlist', stringList(terms)),
     /** Change the watchlist against the freshest stored copy; change(terms) returns the new list. */
     updateWatchlist(change) {
-      update('watchlist', [], (current) => stringList(change(stringList(current))));
+      update('watchlist', [], (current) => cleanTerms(stringList(change(cleanTerms(stringList(current))))));
       return this.watchlist();
     },
 
@@ -223,6 +228,7 @@ export function createStorage(backend = defaultBackend()) {
         const lower = new Set(terms.map((t) => t.toLowerCase()));
         const fresh = [];
         for (const term of stringList(data.watchlist).map(normalizeTerm)) {
+          if (terms.length + fresh.length >= MAX_TERMS) break;
           if (!term || term === '*' || lower.has(term.toLowerCase())) continue;
           lower.add(term.toLowerCase());
           fresh.push(term);
