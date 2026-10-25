@@ -6,11 +6,14 @@
 // writing (read-modify-write) instead of writing back a possibly stale in-memory copy, and
 // other tabs' changes arrive through the browser's "storage" event (see listen()).
 
+import { normalizeTerm } from './watchlist.js';
+
 const PREFIX = 'owlfeed:v1:';
 const READ_TTL_DAYS = 30;
 const DAY = 86_400_000;
 
-export const DEFAULT_PREFS = Object.freeze({ view: 'all', hiddenCategories: [], hiddenSources: [] });
+export const DENSITIES = ['comfortable', 'compact'];
+export const DEFAULT_PREFS = Object.freeze({ view: 'all', hiddenCategories: [], hiddenSources: [], density: 'comfortable', shortcuts: true });
 
 function defaultBackend() {
   try {
@@ -162,12 +165,16 @@ export function createStorage(backend = defaultBackend()) {
     },
 
     prefs() {
-      const value = load('prefs', DEFAULT_PREFS);
+      const value = load('prefs', null);
       const prefs = isPlainObject(value) ? value : {};
       return {
         view: typeof prefs.view === 'string' ? prefs.view : DEFAULT_PREFS.view,
         hiddenCategories: stringList(prefs.hiddenCategories),
         hiddenSources: stringList(prefs.hiddenSources),
+        // No stored choice yet: the app picks the default (comfortable).
+        density: DENSITIES.includes(prefs.density) ? prefs.density : null,
+        // Single-key shortcuts (j, k, d, 1–5...) are on unless the reader turned them off.
+        shortcuts: prefs.shortcuts !== false,
       };
     },
     setPrefs: (prefs) => save('prefs', prefs),
@@ -212,8 +219,14 @@ export function createStorage(backend = defaultBackend()) {
       }
       let termsAdded = 0;
       this.updateWatchlist((terms) => {
+        // Imported terms get the same cleanup as typed ones, so each chip can match its hits.
         const lower = new Set(terms.map((t) => t.toLowerCase()));
-        const fresh = stringList(data.watchlist).filter((t) => t.trim() && !lower.has(t.toLowerCase()));
+        const fresh = [];
+        for (const term of stringList(data.watchlist).map(normalizeTerm)) {
+          if (!term || term === '*' || lower.has(term.toLowerCase())) continue;
+          lower.add(term.toLowerCase());
+          fresh.push(term);
+        }
         termsAdded = fresh.length;
         return [...terms, ...fresh];
       });
@@ -244,6 +257,8 @@ export function createStorage(backend = defaultBackend()) {
           view: typeof data.prefs.view === 'string' ? data.prefs.view : DEFAULT_PREFS.view,
           hiddenCategories: stringList(data.prefs.hiddenCategories),
           hiddenSources: stringList(data.prefs.hiddenSources),
+          density: DENSITIES.includes(data.prefs.density) ? data.prefs.density : DEFAULT_PREFS.density,
+          shortcuts: data.prefs.shortcuts !== false,
         });
       }
       return { terms: termsAdded, saved: savedAdded };

@@ -126,3 +126,8 @@ test('prefixSuggestion turns bare words into prefixes', () => {
   assert.equal(prefixSuggestion('"exact" cve*'), null);
   assert.equal(prefixSuggestion('us'), null); // too short to be a useful prefix
 });
+
+test('a quote still being typed does not empty the search', () => {
+  assert.deepEqual(parseQuery('"volt ty'), ['volt', 'ty']);
+  assert.deepEqual(parseQuery('"volt typhoon"'), ['volt typhoon']);
+});

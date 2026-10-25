@@ -290,3 +290,8 @@ def test_a_304_does_not_keep_tombstones_of_items_the_feed_dropped():
     assert state["expired"]["id-nodate"]["since"] == iso(expired_at)  # not refreshed by the 304s
     later = merge(state, CONFIG, {"alpha": ok(entry("other", published=None)), "bravo": ok()}, expired_at + timedelta(days=36))
     assert "id-nodate" not in later["expired"]
+
+
+def test_malformed_previous_source_rows_are_skipped():
+    previous = {"sources": ["junk", {"id": 5}, {"id": "alpha", "etag": "e", "last_modified": 7}]}
+    assert previous_validators(previous) == {"alpha": ("e", None)}

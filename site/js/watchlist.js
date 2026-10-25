@@ -18,7 +18,7 @@ export function isPrefixTerm(term) {
 /** Add a term unless it is empty or already present (ignoring case). */
 export function addTerm(terms, term) {
   const clean = normalizeTerm(term);
-  if (!clean || terms.some((t) => t.toLowerCase() === clean.toLowerCase())) {
+  if (!clean || clean === '*' || terms.some((t) => t.toLowerCase() === clean.toLowerCase())) {
     return { terms, added: false };
   }
   return { terms: [...terms, clean], added: true };
@@ -46,7 +46,7 @@ export function buildMatcher(terms) {
   const ordered = [...clean].sort((a, b) => core(b).length - core(a).length);
   const groups = ordered.map((t) => `(${escapeRegExp(core(t))}${isPrefixTerm(t) ? '[\\p{L}\\p{N}_]*' : ''})`);
   const source = `(?<![\\p{L}\\p{N}_])(?:${groups.join('|')})(?![\\p{L}\\p{N}_])`;
-  const regex = () => new RegExp(source, 'giu');
+  const regex = new RegExp(source, 'giu'); // matchAll() works on a copy, so one instance is safe to share
   const termOf = (m) => ordered[m.slice(1).findIndex((group) => group !== undefined)];
 
   return {
@@ -55,19 +55,19 @@ export function buildMatcher(terms) {
       const found = new Set();
       for (const text of texts) {
         if (!text) continue;
-        for (const m of text.matchAll(regex())) found.add(termOf(m));
+        for (const m of text.matchAll(regex)) found.add(termOf(m));
       }
       return [...found];
     },
     /** Matched [start, end) ranges in text, for layering with other highlights. */
     ranges(text) {
-      return [...String(text ?? '').matchAll(regex())].map((m) => [m.index, m.index + m[0].length]);
+      return [...String(text ?? '').matchAll(regex)].map((m) => [m.index, m.index + m[0].length]);
     },
     /** Split text into [{ text, match }] parts for highlighting. */
     parts(text) {
       const parts = [];
       let last = 0;
-      for (const m of String(text ?? '').matchAll(regex())) {
+      for (const m of String(text ?? '').matchAll(regex)) {
         if (m.index > last) parts.push({ text: text.slice(last, m.index), match: false });
         parts.push({ text: m[0], match: true });
         last = m.index + m[0].length;

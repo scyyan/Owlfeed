@@ -1,8 +1,8 @@
 // Time helpers. Everything is shown in the viewer's own time zone and locale.
 
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
+export const MINUTE = 60_000;
+export const HOUR = 60 * MINUTE;
+export const DAY = 24 * HOUR;
 
 export function parseTime(value) {
   const ms = Date.parse(value);
@@ -38,6 +38,19 @@ export function clockTime(ms, locale) {
   return new Date(ms).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
 }
 
+/**
+ * A clock time with enough of the day to be unambiguous: "9:58 PM" today, "yesterday 9:58 PM",
+ * "Fri 9:58 PM" within the past week, and "Oct 14, 9:58 PM" beyond that.
+ */
+export function momentLabel(ms, now = Date.now(), locale) {
+  const days = Math.round((startOfDay(now) - startOfDay(ms)) / DAY);
+  const clock = clockTime(ms, locale);
+  if (days <= 0) return clock;
+  if (days === 1) return `yesterday ${clock}`;
+  if (days < 7) return `${new Date(ms).toLocaleDateString(locale, { weekday: 'short' })} ${clock}`;
+  return `${new Date(ms).toLocaleDateString(locale, { month: 'short', day: 'numeric' })}, ${clock}`;
+}
+
 export function fullTime(ms, locale) {
   return new Date(ms).toLocaleString(locale, {
     weekday: 'short',
@@ -63,12 +76,15 @@ function startOfDay(ms) {
   return d.getTime();
 }
 
-/** Day header text: { title: "Today" | "Yesterday" | "Monday", detail: "Wed, Oct 15" }. */
+/**
+ * Day header text: { title: "Today" | "Yesterday" | "Monday", detail: "Wed, Oct 15" }. When the
+ * title already names the weekday, the detail leaves it out ("Monday · Oct 13", not "Monday Mon, Oct 13").
+ */
 export function dayLabel(ms, now = Date.now(), locale) {
   const days = Math.round((startOfDay(now) - startOfDay(ms)) / DAY);
   const sameYear = new Date(ms).getFullYear() === new Date(now).getFullYear();
   const detail = new Date(ms).toLocaleDateString(locale, {
-    weekday: 'short',
+    ...(days <= 1 ? { weekday: 'short' } : {}),
     month: 'short',
     day: 'numeric',
     ...(sameYear ? {} : { year: 'numeric' }),

@@ -186,7 +186,7 @@ class _ParagraphExtractor(HTMLParser):
 
 
 def collapse_whitespace(text: str) -> str:
-    return _WHITESPACE.sub(" ", text.replace(" ", " ")).strip()
+    return _WHITESPACE.sub(" ", text).strip()  # \s also matches non-breaking spaces
 
 
 def _parse_paragraphs(value: str, skip_tags: frozenset[str] = SKIP_TAGS, raw_text: bool = True) -> list[str]:

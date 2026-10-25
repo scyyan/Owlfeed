@@ -22,6 +22,7 @@ TIMEOUT = (10, 20)  # (connect, read) seconds, per socket operation
 DOWNLOAD_DEADLINE = 60.0  # seconds for a whole response body, however slowly it trickles in
 FETCH_ALL_DEADLINE = 180.0  # seconds for every source together; stragglers are reported as timed out
 MAX_BYTES = 10 * 1024 * 1024
+RETRY_BACKOFF_SECONDS = 2.0  # wait before retry n is n times this
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 WORKERS = 8
 
@@ -100,10 +101,15 @@ def fetch(
     if last_modified:
         headers["If-Modified-Since"] = last_modified
 
+    retryable_error: str | None = None
+    last_status: int | None = None  # kept so "HTTP 503" still reports 503 once the retries run out
     for attempt in range(retries + 1):
-        retryable_error: str | None = None
+        retryable_error, last_status = None, None
         try:
             with get(url, headers=headers, timeout=TIMEOUT, stream=True, allow_redirects=True) as response:
+                # Feeds must be https (see config.py); refuse a redirect that downgrades to http.
+                if response.history and not str(response.url).lower().startswith("https://"):
+                    return FetchResult(error="redirected to a non-https URL")
                 status = response.status_code
                 if status == 304:
                     return FetchResult(
@@ -112,7 +118,7 @@ def fetch(
                         last_modified=response.headers.get("Last-Modified") or last_modified,
                     )
                 if status in RETRY_STATUSES:
-                    retryable_error = f"HTTP {status}"
+                    retryable_error, last_status = f"HTTP {status}", status
                 elif status >= 400:
                     return FetchResult(status=status, error=f"HTTP {status}")
                 else:
@@ -132,8 +138,8 @@ def fetch(
         except requests.RequestException as exc:
             return FetchResult(error=_describe(exc))
         if attempt < retries:
-            sleep(2.0 * (attempt + 1))
-    return FetchResult(error=retryable_error)
+            sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+    return FetchResult(status=last_status, error=retryable_error)
 
 
 def fetch_all(

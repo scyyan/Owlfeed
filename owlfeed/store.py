@@ -14,7 +14,7 @@ from typing import Callable
 
 import requests
 
-from .config import Config, is_http_url
+from .config import FUTURE_TOLERANCE, Config, is_http_url
 from .fetch import USER_AGENT, FetchResult
 from .parse import Entry
 
@@ -24,8 +24,6 @@ MAX_ITEMS = 6000
 TOMBSTONE_DAYS = 30
 # Far more than the feeds can list at once; only bounds a corrupt or injected restored state.
 MAX_TOMBSTONES = 5000
-# Restored items dated later than this are corrupt (or injected) and are dropped.
-FUTURE_TOLERANCE = timedelta(minutes=10)
 
 log = logging.getLogger(__name__)
 
@@ -126,16 +124,24 @@ def _clean_previous_item(item: object, now: datetime) -> dict | None:
     }
 
 
+def _previous_source_rows(previous: dict | None) -> dict[str, dict]:
+    """The previous run's source rows by id, skipping malformed ones."""
+    return {
+        row["id"]: row
+        for row in (previous or {}).get("sources", [])
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+
+
 def previous_validators(previous: dict | None) -> dict[str, tuple[str | None, str | None]]:
     """ETag/Last-Modified per source from the previous run, for conditional GETs."""
     validators: dict[str, tuple[str | None, str | None]] = {}
-    for row in (previous or {}).get("sources", []):
-        if isinstance(row, dict) and isinstance(row.get("id"), str):
-            etag, modified = row.get("etag"), row.get("last_modified")
-            validators[row["id"]] = (
-                etag if isinstance(etag, str) else None,
-                modified if isinstance(modified, str) else None,
-            )
+    for source_id, row in _previous_source_rows(previous).items():
+        etag, modified = row.get("etag"), row.get("last_modified")
+        validators[source_id] = (
+            etag if isinstance(etag, str) else None,
+            modified if isinstance(modified, str) else None,
+        )
     return validators
 
 
@@ -143,6 +149,7 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
     sources = config.enabled_sources
     enabled_ids = {s.id for s in sources}
     now_iso = iso(now)
+    previous_rows = _previous_source_rows(previous)
 
     # Undated items that aged out ("tombstones"), so they are not re-created as brand-new items:
     # {id: {"source": id, "since": iso}}. Malformed entries are ignored.
@@ -200,12 +207,11 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
     }
     # When each source last answered (200 or 304) before this run. Tombstones the feed listed then were
     # stamped with that time, so a 304 now (the same feed again) still lists exactly those.
-    last_ok_before: dict[str, str] = {}
-    for row in (previous or {}).get("sources", []):
-        if isinstance(row, dict) and isinstance(row.get("id"), str):
-            last_ok = parse_iso(row.get("last_ok"))
-            if last_ok is not None:
-                last_ok_before[row["id"]] = iso(last_ok)
+    last_ok_before = {
+        source_id: iso(last_ok)
+        for source_id, row in previous_rows.items()
+        if (last_ok := parse_iso(row.get("last_ok"))) is not None
+    }
     tombstone_cutoff = iso(now - timedelta(days=TOMBSTONE_DAYS))
     expired: dict[str, dict] = {}
     for item_id, mark in expired_before.items():
@@ -231,11 +237,6 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
     items.sort(key=lambda item: (item["published"], item["first_seen"]), reverse=True)
     items = items[:MAX_ITEMS]
 
-    previous_rows = {
-        row["id"]: row
-        for row in (previous or {}).get("sources", [])
-        if isinstance(row, dict) and isinstance(row.get("id"), str)
-    }
     counts = Counter(item["source"] for item in items)
     rows = []
     for source in sources:

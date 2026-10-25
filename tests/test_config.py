@@ -42,6 +42,8 @@ def test_valid_config_with_defaults():
         (source(group="News"), "group for Cyber must be one of"),
         (source(feed="http://example.com/feed"), "'feed' must use https://"),
         (source(feed="https://[broken-ipv6/feed"), "'feed' must be an http(s) URL"),
+        (source(tz="Europe/Brussels"), "unknown option(s) tz"),
+        (source(summary_form="content"), "unknown option(s) summary_form"),
     ],
 )
 def test_invalid_sources(bad, message):

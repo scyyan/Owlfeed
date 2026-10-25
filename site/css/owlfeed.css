@@ -10,16 +10,16 @@
   --border: #e1e4e9;
   --accent: #2453c8;
   --accent-soft: #e7edfb;
-  --cyber: #2563eb;
-  --cyber-ink: #2563eb;
-  --geo: #0a7380; /* teal: no warm hue, so a Geopolitics byline never reads as an alarm */
-  --geo-ink: #0a7380;
+  --cyber: #0e7490; /* cyan-teal: clearly apart from the action blue */
+  --geo: #a3199f; /* magenta-purple: well apart from the action blue */
+  --unread: #2453c8; /* the action blue: green stays for new and healthy */
   --other: #7c3aed;
   --new: #0f6e33;
   --new-soft: #dff4e6;
   --watch: #a15c00;
+  --shadow-pop: 0 6px 18px rgb(0 0 0 / 18%); /* dialogs, popovers and toasts */
   --watch-soft: #fdf0d9;
-  --watch-wash: #fef6e8;
+  --watch-wash: #fbe7c6; /* 1.21:1 on paper: visible from across the desk; muted text still 4.66:1 */
   --mark: #ffe58f;
   --ok: #16a34a;
   --error: #b93d06;
@@ -46,16 +46,15 @@
     --border: #252e4a;
     --accent: #7aa5ff;
     --accent-soft: #1b2650;
-    --cyber: #7aa5ff;
-    --cyber-ink: #7aa5ff;
-    --geo: #3cc6d0;
-    --geo-ink: #3cc6d0;
+    --cyber: #3cc6d0;
+    --geo: #e08af0;
+    --unread: #7aa5ff;
     --other: #b794f6;
     --new: #4ade80;
     --new-soft: #10301f;
     --watch: #f5c451;
     --watch-soft: #3a2c10;
-    --watch-wash: #27221c;
+    --watch-wash: #312a17;
     --mark: rgb(245 196 81 / 32%);
     --ok: #4ade80;
     --error: #fb8b4b;
@@ -78,16 +77,15 @@
   --border: #252e4a;
   --accent: #7aa5ff;
   --accent-soft: #1b2650;
-  --cyber: #7aa5ff;
-  --cyber-ink: #7aa5ff;
-  --geo: #3cc6d0;
-  --geo-ink: #3cc6d0;
+  --cyber: #3cc6d0;
+  --geo: #e08af0;
+  --unread: #7aa5ff;
   --other: #b794f6;
   --new: #4ade80;
   --new-soft: #10301f;
   --watch: #f5c451;
   --watch-soft: #3a2c10;
-  --watch-wash: #27221c;
+  --watch-wash: #312a17;
   --mark: rgb(245 196 81 / 32%);
   --ok: #4ade80;
   --error: #fb8b4b;
@@ -120,6 +118,11 @@ button,
 input {
   font: inherit;
   color: inherit;
+}
+
+input::placeholder {
+  color: var(--muted); /* the browser default grey falls under 4.5:1 on the canvas */
+  opacity: 1;
 }
 
 :focus-visible {
@@ -177,7 +180,7 @@ kbd {
   border-radius: 12px;
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-pop);
 }
 
 .help::backdrop {
@@ -193,8 +196,44 @@ kbd {
 
 .help-title {
   margin: 0;
-  font-size: 16.5px;
+  font-size: 17.5px;
   font-weight: 650;
+}
+
+.keys-switch {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.keys-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.keys-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.keys-switch-hint {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+  text-wrap: pretty;
+}
+
+/* Shortcuts off: the list stays readable, but plainly not in force. */
+.help.shortcuts-off .keys-shortcuts {
+  opacity: 0.55;
 }
 
 .keys {
@@ -214,6 +253,15 @@ kbd {
   margin: 0;
   color: var(--text-2);
   font-size: 14px;
+}
+
+.keys.terms {
+  margin-bottom: 4px;
+}
+
+.keys.terms dt {
+  font-weight: 650;
+  font-size: 13px;
 }
 
 .help-subtitle {
@@ -266,7 +314,9 @@ kbd {
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh; /* the visible height on phones (Safari's toolbar); falls back to 100vh */
   overflow-y: auto;
+  scrollbar-gutter: stable; /* content doesn't shift when the list grows past the screen */
   padding: 16px 14px 24px;
   background: var(--surface);
   border-right: 1px solid var(--border);
@@ -292,6 +342,7 @@ kbd {
 }
 
 .brand-name {
+  margin: 0;
   font-weight: 700;
   font-size: 18px;
   letter-spacing: 0.2px;
@@ -427,6 +478,7 @@ kbd {
   gap: 8px;
   flex: 1;
   min-width: 0;
+  min-height: 32px;
   padding: 4px 6px;
   border-radius: 6px;
   cursor: pointer;
@@ -460,14 +512,24 @@ kbd {
 }
 
 .only-btn {
+  position: relative;
   opacity: 0;
-  padding: 1px 6px;
+  min-height: 24px;
+  padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
   cursor: pointer;
+}
+
+/* A 32px target around the 24px button (the row is 32px tall), without a heavier look. */
+.only-btn::after,
+.chip-remove::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
 }
 
 .source-row:hover .only-btn,
@@ -500,6 +562,12 @@ kbd {
   background: var(--error);
 }
 
+/* Stale data: answered at the last sweep, state now unknown. A hollow ring, never a healthy green. */
+.health-dot.is-unknown {
+  border: 1.5px solid var(--muted);
+  background: transparent;
+}
+
 .source-row.is-error .row-label {
   color: var(--error);
 }
@@ -529,13 +597,140 @@ kbd {
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px 4px 2px 9px;
+  gap: 0;
+  padding: 2px 3px 2px 2px;
   border-radius: 999px;
   background: var(--watch-soft);
   color: var(--watch);
   font-size: 12.5px;
   font-weight: 600;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+/* The chip's body is a filter toggle: that term's hits alone. */
+.chip-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chip-filter:hover {
+  background: var(--hover-tint);
+}
+
+.chip-count {
+  min-width: 1.4em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface); /* amber on paper: 4.5:1 or better in both themes */
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 17px;
+  text-align: center;
+}
+
+/* Pressed: the timeline shows only this term's hits. Same outline language as the New chip. */
+.chip.is-active {
+  outline: 2px solid var(--watch);
+  outline-offset: 0;
+}
+
+.chip.is-active .chip-count {
+  background: var(--watch);
+  color: var(--surface);
+}
+
+.item-summary.is-snippet {
+  color: var(--text-2);
+}
+
+/* "2 terms could catch more · Review": one quiet line under the chips, not an offer per chip. */
+/* Prefix upgrades under the chips: "Zelensky → Zelensky* (+3)". */
+.watch-upgrades {
+  padding: 6px 6px 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.watch-upgrades-line {
+  margin: 0;
+}
+
+.watch-upgrades-list {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.watch-upgrade {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px dashed color-mix(in srgb, var(--watch) 55%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--watch);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.watch-upgrade:hover {
+  border-style: solid;
+  background: var(--hover-tint);
+}
+
+.watch-upgrade-extra {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Help glossary: the real glyphs beside their meaning. */
+.glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  vertical-align: middle;
+}
+
+.glyph .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.glyph-read {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.glyph-saved {
+  background: var(--watch-soft);
+  color: var(--saved);
+}
+
+.glyph-saved .icon {
+  fill: currentColor;
+}
+
+/* No hits right now: still listed, just quieter, so the terms with hits lead. */
+.chip.is-quiet .chip-count {
+  background: transparent;
+  color: var(--muted);
 }
 
 /* "Already on your watchlist": the existing chip answers with one pulse. */
@@ -555,10 +750,11 @@ kbd {
 }
 
 .chip-remove {
+  position: relative;
   display: inline-grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 24px; /* drawn at 24px; ::after widens the target to 32px */
+  height: 24px;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -580,6 +776,7 @@ kbd {
   margin: 8px 6px 0;
   font-size: 12px;
   color: var(--muted);
+  text-wrap: pretty;
 }
 
 .side-footer {
@@ -621,8 +818,29 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-/* Phones keep "mark all read" in the drawer, not beside the search box (see the 600px query). */
+.icon-btn[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.density-link,
+.labels-link,
+.title-touch {
+  display: none;
+}
+
+.density-link[aria-pressed="true"] {
+  color: var(--accent);
+  font-weight: 650;
+}
+
 .theme-link {
+  display: none;
+}
+
+/* Phones keep "mark all read" in the drawer, not beside the search box (see the 600px query). */
+.mark-all-section {
   display: none;
 }
 
@@ -633,15 +851,18 @@ kbd {
   justify-content: center;
 }
 
+/* In the phone drawer it's the one bulk action, so it takes the action tint and stands apart
+   from the plain settings buttons below it. */
+.mark-all-drawer:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .btn-small {
   padding: 5px 10px;
   font-size: 13px;
-}
-
-.btn-ghost {
-  border-color: transparent;
-  background: transparent;
-  color: var(--text-2);
 }
 
 .icon-btn {
@@ -657,8 +878,7 @@ kbd {
   cursor: pointer;
 }
 
-.icon-btn:hover,
-.btn-ghost:hover:not(:disabled) {
+.icon-btn:hover {
   background: var(--surface-2);
   color: var(--text);
 }
@@ -674,6 +894,24 @@ kbd {
 
 .link-btn:hover {
   text-decoration: underline;
+}
+
+/* Small text links keep their look but get a taller target (the margin gives the height back). */
+.side-actions .link-btn,
+.side-heading-row .link-btn,
+.stale-dismiss {
+  padding: 6px 0;
+  margin: -6px 0;
+}
+
+/* While the feed loads, the sidebar's lists show where their rows will be. */
+.app:has(#feed[aria-busy="true"]) :is(#category-list, #source-list):empty::before {
+  content: "";
+  display: block;
+  height: 56px;
+  margin: 2px 8px 0;
+  border-radius: 6px;
+  background: repeating-linear-gradient(to bottom, var(--surface-2) 0 14px, transparent 14px 28px);
 }
 
 /* Theme toggle shows the mode you would switch to. */
@@ -708,13 +946,19 @@ kbd {
   align-items: center;
   gap: 10px;
   height: var(--topbar-h);
-  padding: 0 20px;
+  /* On wide screens the bar's contents line up with the timeline's day cards below. */
+  padding: 0 max(20px, calc((100% - 880px) / 2 + 24px));
   background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
 
 .topbar .menu-btn {
+  display: none;
+}
+
+/* The phone tab bar (shown under 600px). */
+.tabbar {
   display: none;
 }
 
@@ -735,6 +979,7 @@ kbd {
   top: 50%;
   transform: translateY(-50%);
   color: var(--muted);
+  pointer-events: none; /* clicks fall through to the input */
 }
 
 .search input {
@@ -743,22 +988,6 @@ kbd {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-}
-
-.chip-new {
-  padding: 4px 10px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--new-soft);
-  color: var(--new);
-  font-size: 12.5px;
-  font-weight: 650;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.chip-new[aria-pressed="true"] {
-  outline: 2px solid var(--new);
 }
 
 /* ── Watch status: the top bar's anchor. Owl eyes + freshness + source health. ── */
@@ -872,7 +1101,7 @@ kbd {
   padding: 1px 7px;
   border: 1px solid currentColor;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.5px;
   line-height: 15px;
@@ -922,7 +1151,7 @@ kbd {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-pop);
   font-size: 13px;
 }
 
@@ -986,6 +1215,11 @@ kbd {
   text-wrap: pretty;
 }
 
+.watch-actions {
+  display: flex;
+  margin: 12px 0 0;
+}
+
 .watch-failing {
   margin: 0;
   padding-left: 18px;
@@ -1021,6 +1255,12 @@ kbd {
   margin: 0;
 }
 
+.stale-short {
+  display: none;
+  flex: 1 1 auto;
+  margin: 0;
+}
+
 .stale-dismiss {
   color: var(--error);
   font-weight: 650;
@@ -1044,14 +1284,221 @@ kbd {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 6px 10px;
   margin: 6px 0 2px;
-  padding: 8px 12px;
+  padding: 6px 8px 6px 12px;
   border-radius: 10px;
   background: var(--accent-soft);
   font-size: 13px;
   color: var(--text-2);
+}
+
+.active-filters.is-idle {
+  display: none;
+}
+
+.filters-view {
+  color: var(--text-2);
+}
+
+/* While searching, every sidebar count is a match count: it takes the search blue. */
+.sidebar.is-searching .view-btn .count,
+.sidebar.is-searching .check-row .count {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.meta-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* A long source name may wrap inside itself; its separator still ends it. */
+.meta-part:first-child {
+  min-width: 0;
+  white-space: normal;
+}
+
+.briefing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin: 12px 2px 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The separator ends its item, so a wrapped line never starts with "·". */
+.briefing-part:not(:last-child)::after {
+  content: "·";
+  margin: 0 8px;
+  color: var(--muted);
+}
+
+/* Stale, folded into the briefing line: Alarm Rust, before the counts it qualifies. */
+.briefing-stale {
+  color: var(--error);
+  font-weight: 650;
+}
+
+.briefing-scope {
+  color: var(--muted);
+}
+
+.filters-widened {
+  flex-basis: 100%;
+  order: 3;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+/* A count that filters: underlined on hover, like the other link buttons. */
+.briefing-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text-2) 35%, transparent);
+  text-underline-offset: 3px;
+}
+
+.briefing-link:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+
+.briefing strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* Hits first: the section header takes the owl's amber; inside it the badge carries the signal. */
+.day-pinned .day-title {
+  color: var(--watch);
+}
+
+.feed .day-pinned .item.is-watch:not(:has(:focus-visible)) {
+  background: var(--surface);
+}
+
+.caught-up {
+  margin: 28px 0 0;
+  padding: 18px 16px 0;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.caught-up-title {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.caught-up-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.caught-up-action {
+  margin-top: 12px;
+}
+
+/* "Show all 38 hits here": a quiet link under the pinned rows, inside the section's frame. */
+.pinned-toggle {
+  display: block;
+  margin: 8px 2px 0;
+}
+
+/* In the New view every row is new: the badge would mark nothing (Just in still says more). */
+.feed[data-showing="new"] .badge-new:not(.badge-arrived) {
+  display: none;
+}
+
+.filters-variant {
+  order: 3;
+  font-weight: 650;
+}
+
+/* A hidden category's count: what showing it would add, muted and in brackets. */
+.sidebar .count.is-hidden {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.count.is-hidden::before {
+  content: "(";
+}
+
+.count.is-hidden::after {
+  content: ")";
+}
+
+.filters-count {
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-tokens {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One constraint, removable on its own: a firm control (not a pill: it is a command). */
+.filter-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 6px 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.filter-token-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-token .icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.filter-token:hover {
+  border-color: var(--accent);
+}
+
+.filter-token:hover .icon {
+  color: var(--accent);
+}
+
+.filters-clear {
+  margin-left: auto;
 }
 
 .new-pill {
@@ -1067,7 +1514,7 @@ kbd {
   color: var(--on-accent);
   font-weight: 600;
   font-size: 13.5px;
-  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-pop);
   cursor: pointer;
 }
 
@@ -1086,7 +1533,7 @@ kbd {
   background: var(--text);
   color: var(--bg);
   font-size: 13.5px;
-  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-pop);
   pointer-events: none; /* never blocks a tap on the buttons beneath it... */
 }
 
@@ -1171,8 +1618,12 @@ kbd {
   background: var(--watch-wash);
 }
 
+/* A read hit keeps a lighter wash, so a later scan still finds the hits. */
+.item.is-watch.is-read {
+  background: color-mix(in srgb, var(--watch-wash) 50%, var(--surface));
+}
+
 /* In the Watchlist hits view every row is a hit: the wash would mark nothing, so the badge carries it. */
-.item.is-watch.is-read,
 .feed[data-showing="watchlist"] .item.is-watch {
   background: var(--surface);
 }
@@ -1197,10 +1648,11 @@ kbd {
 
 .item-title {
   margin: 0;
-  font-size: 16.5px;
+  font-size: 17.5px; /* 1.25× the 14px summary at every width: the headline leads by size as well as weight */
   font-weight: 650;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  text-wrap: pretty; /* no one-word last lines */
 }
 
 .item-title a {
@@ -1208,16 +1660,18 @@ kbd {
   text-decoration: none;
 }
 
-.item-title a:hover {
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
 .item-title a:visited,
 .item.is-read .item-title a {
   color: var(--muted);
   font-weight: 550;
+}
+
+/* After the read rule, and as specific, so read and visited headlines also turn blue on hover. */
+.item-title a:hover,
+.item.is-read .item-title a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .item-meta {
@@ -1234,17 +1688,8 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-weight: 650;
-  color: var(--text-2);
-}
-
-/* The domain reads at a glance: source names carry their category's ink. */
-.item-source.cat-cyber {
-  color: var(--cyber-ink);
-}
-
-.item-source.cat-geopolitics {
-  color: var(--geo-ink);
+  font-weight: 600;
+  color: var(--text-2); /* neutral ink, so the headline leads; the dot carries the category hue */
 }
 
 .item-source::before {
@@ -1275,11 +1720,24 @@ kbd {
   line-height: 18px;
 }
 
-.badge-new {
+.badge-new,
+.term-new {
   background: var(--new-soft);
   color: var(--new);
   text-transform: uppercase;
   letter-spacing: 0.4px;
+}
+
+/* Just in: arrived while the page was open. The newest kind of new, so the same green, filled. */
+.badge-arrived,
+.term-arrived {
+  background: var(--new);
+  color: var(--on-accent);
+}
+
+/* NEW and Just in mean "still to read": a read row drops them. */
+.item.is-read .badge-new {
+  display: none;
 }
 
 .badge-watch {
@@ -1298,10 +1756,22 @@ kbd {
 }
 
 .item-summary {
+  max-width: 60ch; /* about 80 characters a line, even in the 880px column */
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; /* scan first: two lines, the full text is one click away at the source */
+  line-clamp: 2;
   margin: 0;
   color: var(--text-2);
-  font-size: 14.5px;
+  font-size: 14px;
   overflow-wrap: anywhere;
+}
+
+/* The row under the keyboard cursor reads in full. */
+.item:has(:focus-visible) .item-summary {
+  -webkit-line-clamp: unset;
+  line-clamp: none;
 }
 
 .item-summary.is-empty {
@@ -1335,9 +1805,14 @@ mark.hl-watch.hl-search {
   border-radius: 3px;
 }
 
+/* Faded read text must not fade the highlighted term: full ink on the amber tint keeps AA. */
+mark.hl-watch {
+  color: var(--text);
+}
+
 .filters-tip {
   flex-basis: 100%;
-  order: 3;
+  order: 4;
   color: var(--muted);
   font-size: 12.5px;
 }
@@ -1379,6 +1854,70 @@ mark.hl-watch.hl-search {
   background: var(--surface);
 }
 
+/*
+ * With a mouse, actions that haven't been used rest quietly (a bare icon) and firm up when the
+ * row is hovered or focused; saved and read always show. Touch keeps the firm buttons.
+ */
+@media (hover: hover) {
+  .item .item-btn:not(.btn-save[aria-pressed="true"]) {
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted);
+  }
+
+  .item:is(:hover, :focus-within) .item-btn:not(.btn-save[aria-pressed="true"]) {
+    border-color: var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+  }
+
+  .item .item-btn:not(.btn-save[aria-pressed="true"]):hover {
+    border-color: color-mix(in srgb, var(--text-2) 45%, var(--border));
+    background: var(--surface-2);
+    color: var(--text);
+  }
+}
+
+/* ── Compact rows: headline and meta only, for a briefing scan or a second screen ── */
+.feed[data-density="compact"] .item {
+  align-items: center;
+  gap: 0 12px;
+  padding: 7px 12px 7px 16px;
+}
+
+.feed[data-density="compact"] .item-title {
+  font-size: 15.5px;
+  line-height: 1.3;
+}
+
+.feed[data-density="compact"] .item-meta {
+  margin: 2px 0 0;
+}
+
+.feed[data-density="compact"] .item-summary {
+  display: none;
+}
+
+.feed[data-density="compact"] .item:has(:focus-visible) .item-summary {
+  display: block;
+  margin-top: 4px;
+}
+
+.feed[data-density="compact"] .item-actions {
+  flex-direction: row;
+  gap: 4px;
+}
+
+.feed[data-density="compact"] .item-btn {
+  width: 32px;
+  height: 32px;
+}
+
+.feed[data-density="compact"] .item-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+
 .btn-save[aria-pressed="true"] {
   border-color: color-mix(in srgb, var(--saved) 45%, var(--border));
   background: var(--watch-soft);
@@ -1389,15 +1928,21 @@ mark.hl-watch.hl-search {
   fill: currentColor;
 }
 
-/* Unread: an empty ring (nothing done yet). Read: the ring fills with a Healthy Green check. */
+/*
+ * Unread vs read is told by the headline itself: unread is full, bold ink and read fades to muted
+ * at a lighter weight, with the ring filling with a check. Whichever state is the minority stands
+ * out, so no per-row dot is needed (forced-colours mode, which drops the fade, keeps one below).
+ */
 .btn-read .path-tick {
   opacity: 0;
 }
 
 .btn-read[aria-pressed="true"] {
-  border-color: color-mix(in srgb, var(--ok) 40%, var(--border));
-  background: var(--new-soft);
-  color: var(--ok);
+  color: var(--muted);
+}
+
+.item-title {
+  position: relative;
 }
 
 .btn-read[aria-pressed="true"] .path-tick {
@@ -1419,7 +1964,7 @@ mark.hl-watch.hl-search {
 
 .empty-title {
   margin: 0 0 4px;
-  font-size: 16px;
+  font-size: 17.5px;
   font-weight: 650;
 }
 
@@ -1428,8 +1973,63 @@ mark.hl-watch.hl-search {
   color: var(--muted);
 }
 
+/* Without JavaScript the app never starts: the <noscript> note replaces the loading line. */
+html:not([data-app]) .loading {
+  display: none;
+}
+
 .sentinel {
   height: 1px;
+}
+
+/*
+ * Half screens and second monitors (up to 1100px): the search keeps a usable width. The watch
+ * status takes its compact form ("14m ago", the tally only while a source fails). "Mark N read"
+ * keeps its words: an icon and a bare number read like "N done".
+ */
+@media (max-width: 1100px) {
+  .watch-short {
+    display: inline;
+  }
+
+  .updated,
+  .watch-unit {
+    display: none;
+  }
+
+  .watch-btn:not(.has-failing) .watch-tally {
+    display: none;
+  }
+
+  .topbar {
+    gap: 8px;
+    padding: 0 16px;
+  }
+}
+
+/* Narrower still: the button tightens, the label stays whole. */
+@media (max-width: 1000px) {
+  .topbar .mark-all {
+    height: 38px;
+    padding: 0 10px;
+  }
+}
+
+/* Only the search gives way; every other top-bar control keeps its size. */
+.topbar > :not(.search) {
+  flex-shrink: 0;
+}
+
+@media (min-width: 601px) {
+  .search {
+    min-width: 220px;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 1000px) {
+  .search {
+    min-width: 200px;
+  }
 }
 
 /* ── Phones and small tablets ───────────────────────────────────────────── */
@@ -1491,6 +2091,7 @@ mark.hl-watch.hl-search {
 
   .side-actions .link-btn {
     min-height: 44px;
+    margin: 0;
     padding: 0 10px;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -1547,12 +2148,56 @@ mark.hl-watch.hl-search {
     display: inline-flex;
   }
 
-  .topbar #theme-btn {
+  .topbar #theme-btn,
+  .topbar .density-btn {
     display: none;
   }
 
-  .theme-link {
+  .theme-link,
+  .density-link {
     display: inline;
+  }
+
+  /* Phones have no sidebar on screen: the idle bar says which view this is. */
+  .active-filters.is-idle {
+    display: flex;
+    gap: 8px;
+    padding: 5px 12px;
+    background: transparent;
+  }
+
+  .mark-all-section {
+    display: block;
+  }
+
+  /* Compact on a phone: the star alone, so a row is one tap target tall. Opening an item marks
+     it read, and "Mark these N read" closes out the list. */
+  .feed[data-density="compact"] .btn-read {
+    display: none;
+  }
+
+  /* One line: the STALE chip carries the alarm, this says how old the data is. */
+  .stale-banner {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0 2px;
+    padding: 7px 10px;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .stale-text {
+    display: none;
+  }
+
+  .stale-short {
+    display: block;
+  }
+
+  .stale-dismiss {
+    flex: none;
+    white-space: nowrap;
   }
 
   /* 16px or larger, so iOS doesn't zoom the page when a field takes focus. */
@@ -1561,29 +2206,181 @@ mark.hl-watch.hl-search {
   }
 
   .item {
-    padding: 12px 10px 12px 13px;
+    padding: 12px 10px 12px 16px;
     gap: 2px 8px;
   }
 
-  .item-title {
-    font-size: 16px;
-  }
-
-  /* Phones: three lines of summary, so a glance covers more than two items. */
+  /* Phones: three short lines of summary, so a glance still covers more than two items. */
   .item-summary {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
     line-clamp: 3;
+  }
+
+  .feed[data-density="compact"] .item {
+    padding: 6px 8px 6px 16px;
+  }
+
+  .feed[data-density="compact"] .item-title {
+    font-size: 15.5px;
+  }
+
+  /*
+   * The headline and summary take the full width; save and read sit side by side at the end of
+   * the meta line instead of stacking down the right edge.
+   */
+  .item-body {
+    display: contents;
+  }
+
+  .item-title,
+  .item-summary {
+    grid-column: 1 / -1;
+  }
+
+  .item-meta {
+    grid-column: 1;
+    margin: 2px 0;
+  }
+
+  /* Beside the 44px buttons the meta line is narrow: the source takes its own line (so no
+     separator dangles at a line end), and time, age and badges follow beneath it. */
+  .item-meta > .meta-part:first-child {
+    flex-basis: 100%;
+  }
+
+  .item-meta > .meta-part:first-child .sep {
+    display: none;
+  }
+
+  .item-actions,
+  .feed[data-density="compact"] .item-actions {
+    flex-direction: row;
+    gap: 6px;
+    grid-row: 2;
+    grid-column: 2;
+    align-self: center;
+  }
+
+  .feed[data-density="compact"] .item-meta {
+    margin: 0;
+  }
+
+  /* "Hide for now" keeps its small look but gets a full-height tap target. */
+  .stale-dismiss {
+    min-height: 44px;
+    margin: -12px -6px;
+    padding: 0 6px;
+  }
+}
+
+/*
+ * 900px and under (phones, tablets, a half-screen window): the sidebar is a drawer, so a tab bar
+ * fixed to the bottom names the current view and keeps the main views one tap away. Filters
+ * opens the drawer.
+ */
+@media (max-width: 900px) {
+  /* The tab bar names the view, so the idle bar would only repeat it. */
+  .active-filters.is-idle {
+    display: none;
+  }
+
+  /* Filters in the tab bar opens the drawer; the top bar keeps its width for status and search. */
+  .topbar .menu-btn {
+    display: none;
+  }
+
+  .tabbar {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 15;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    padding: 5px max(8px, env(safe-area-inset-right)) max(5px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+  }
+
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    min-height: 48px;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+
+  .tab:active {
+    background: var(--hover-tint);
+  }
+
+  .tab-label {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .tab .count {
+    line-height: 1.2;
+  }
+
+  .tab[aria-current="true"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .tab[aria-current="true"] .count {
+    color: var(--accent);
+  }
+
+  /* Sized so Filters' label sits on the same baseline as the labels above the counts. */
+  .tab-filters .icon {
+    width: 15px;
+    height: 15px;
+  }
+
+  .tab-filters[aria-expanded="true"] {
+    color: var(--accent);
+  }
+
+  .content {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  /* Toasts and Undo sit above the tab bar, not over it. */
+  .status {
+    bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+}
+
+/* The smallest phones (320px): "Watchlist" would touch its tab's edges, so the labels shrink a notch. */
+@media (max-width: 340px) {
+  .tab-label {
+    font-size: 12px;
   }
 }
 
 /* Touch screens have no hover, so the "only" shortcut must always be visible (it is tappable). */
 @media (hover: none) {
-  /* Keyboard shortcuts mean nothing without a keyboard. */
-  #help-btn {
+  /* Keyboard shortcuts mean nothing without a keyboard: the dialog opens on the labels instead. */
+  #help-btn,
+  .keys-only,
+  .title-keys,
+  .keys-shortcuts,
+  .help-labels-heading {
     display: none;
+  }
+
+  .labels-link,
+  .title-touch {
+    display: inline;
   }
 
   .icon-btn,
@@ -1599,9 +2396,22 @@ mark.hl-watch.hl-search {
     padding: 4px 10px;
   }
 
-  .item-btn {
+  .item-btn,
+  .feed[data-density="compact"] .item-btn {
     width: 44px;
     height: 44px;
+  }
+
+  .feed[data-density="compact"] .item-actions {
+    gap: 2px;
+  }
+
+  .chip-filter {
+    min-height: 32px;
+  }
+
+  .filter-token {
+    min-height: 36px;
   }
 
   .chip-remove {
@@ -1631,5 +2441,70 @@ mark.hl-watch.hl-search {
     animation: none;
     outline: 2px solid var(--watch);
     outline-offset: 1px;
+  }
+}
+
+/* Windows High Contrast and other forced-colour modes drop backgrounds, so markers drawn only
+   with a background (dots, selected views, pressed toggles) get a system colour or an outline. */
+@media (forced-colors: active) {
+  /* The read fade is gone here, so older unread rows get a dot in the gutter instead. */
+  .item:not(.is-read):not(:has(.badge-new)) .item-title::before {
+    content: "";
+    position: absolute;
+    top: calc(0.675em - 3px); /* centred on the first line (line-height 1.35) */
+    left: -11px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .feed[data-showing="new"] .item .item-title::before,
+  .feed[data-showing="unread"] .item .item-title::before {
+    content: none;
+  }
+
+  .item:not(.is-read) .item-title::before,
+  .cat-dot,
+  .cat-dot.cat-cyber,
+  .cat-dot.cat-geopolitics,
+  .health-dot,
+  .health-dot.is-ok,
+  .health-dot.is-error,
+  .item-source::before,
+  .item-source.cat-cyber::before,
+  .item-source.cat-geopolitics::before {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+
+  /* With every colour gone the dots tell things apart by shape and system colour instead:
+     unread takes the Highlight colour, Geopolitics is a rounded square (Cyber stays round), and a
+     source that isn't answering is a hollow ring (an answering one stays filled). */
+  .item:not(.is-read) .item-title::before {
+    background: Highlight;
+  }
+
+  .cat-dot.cat-geopolitics,
+  .item-source.cat-geopolitics::before {
+    border-radius: 3px;
+  }
+
+  .health-dot.is-error,
+  .health-dot.is-unknown {
+    box-sizing: border-box;
+    border: 2px solid CanvasText;
+    background: transparent;
+  }
+
+  .health-dot.is-unknown {
+    border-style: dotted;
+  }
+
+  .view-btn[aria-current="true"],
+  .tab[aria-current="true"],
+  .icon-btn[aria-pressed="true"],
+  .btn-save[aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
 }

@@ -1,0 +1,103 @@
+name: Refresh feed
+
+# Fetches every source in sources.yml, merges the results with the feed that is
+# currently live, and publishes the dashboard to GitHub Pages.
+on:
+  schedule:
+    - cron: "4,19,34,49 * * * *" # every 15 minutes; GitHub may start scheduled runs a few minutes late
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# One refresh at a time, so two runs never race to publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Runs the fetcher (third-party feeds and packages) with read-only permissions.
+    name: Fetch feeds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: read # configure-pages looks up the site's URL
+      actions: read # find this workflow's previous run and its saved feed
+    steps:
+      - uses: actions/checkout@v5
+      # No dependency cache here: caches can be written by other workflows on main.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install dependencies (hash-pinned)
+        run: pip install --require-hashes -r requirements.txt
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Restore the saved copy of the feed
+        # Only used if the live feed.json answers 404 (e.g. a Pages hiccup), so history survives.
+        # It comes from this workflow's own last successful scheduled or push run on main: those
+        # always run main's own code (a manual run can be started from any ref). Best effort: if
+        # the lookup fails, the run carries on without it.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow refresh.yml --branch main \
+            --status success --limit 20 --json databaseId,event \
+            --jq '[.[] | select(.event == "schedule" or .event == "push")][0].databaseId // empty') \
+            || { echo "::warning::Could not look up the last refresh; continuing without a saved feed"; run_id=""; }
+          if [ -n "${run_id}" ]; then
+            if ! gh run download "${run_id}" --repo "$GITHUB_REPOSITORY" --name feed-state --dir .state; then
+              rm -rf .state  # never use a partial download
+              echo "Run ${run_id} has no saved feed; continuing without one"
+            fi
+          else
+            echo "No earlier successful refresh; continuing without a saved feed"
+          fi
+      - name: Fetch feeds
+        # The live feed.json is this run's memory of earlier items. If it cannot be read
+        # (anything other than "not found"), the build stops and the current dashboard stays
+        # up rather than being replaced by a partial one.
+        env:
+          PREVIOUS_FEED: ${{ steps.pages.outputs.base_url }}/data/feed.json
+        run: >-
+          python -m owlfeed build --out site/data/feed.json
+          --previous-url "${PREVIOUS_FEED}?run=${GITHUB_RUN_ID}"
+          --fallback-file .state/feed.json
+      - name: Keep a copy for the next run
+        run: mkdir -p .state && cp site/data/feed.json .state/feed.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feed-state
+          path: .state/feed.json
+          retention-days: 3
+          if-no-files-found: error
+      - name: Version CSS and JavaScript URLs
+        # Adds ?v=<content hash> to every stylesheet, script and module import in this
+        # checkout's site/, so a reader arriving mid-deploy never pairs cached old files with
+        # new ones (Pages lets browsers cache for ~10 minutes). The checkout is thrown away
+        # after the run, so the repository itself is never stamped.
+        run: python -m owlfeed stamp site
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    # Only this job can publish; it runs no repository code.
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -92,13 +92,33 @@ function actionButton(kind, pressed) {
   return button;
 }
 
-/** ctx: { now, matcher, tokens, isRead(id), isSaved(id), isNew(item) } */
+// Roughly what two clamped summary lines show; a first match past this would be cut off.
+const VISIBLE_CHARS = 110;
+
+/**
+ * Where to start the summary so the reason a row is here stays visible: the search match (or, in
+ * the Watchlist hits view, the watch match) when the headline has none and the summary's first one
+ * falls past the visible lines. Starts a few words before it, at a word boundary.
+ */
+function matchWindow(item, ctx) {
+  const none = { start: 0 };
+  const searching = ctx.tokens?.length > 0;
+  const watching = ctx.view === 'watchlist' && ctx.matcher;
+  if (!searching && !watching) return none;
+  const ranges = (text) => (searching ? queryRanges(text, ctx.tokens) : ctx.matcher.ranges(text));
+  if (ranges(item.title).length) return none;
+  const first = ranges(item.summary)[0];
+  if (!first || first[0] < VISIBLE_CHARS) return none;
+  const space = item.summary.lastIndexOf(' ', first[0] - 40);
+  return { start: space > 0 ? space + 1 : 0 };
+}
+
+/** ctx: { now, view, matcher, tokens, isRead(id), isSaved(id), isNew(item), isArrived(item) } */
 export function itemElement(item, ctx) {
   const article = el('article', 'item');
   article.dataset.id = item.id;
   const isNew = ctx.isNew(item);
   article.classList.toggle('is-read', ctx.isRead(item.id));
-  article.classList.toggle('is-new', isNew);
   article.classList.toggle('is-watch', item.watch.length > 0);
 
   const body = el('div', 'item-body');
@@ -127,8 +147,19 @@ export function itemElement(item, ctx) {
     : fullTime(item.publishedMs);
   const age = el('span', 'item-age', relativeTime(item.publishedMs, ctx.now));
   age.dataset.ms = String(item.publishedMs);
-  meta.append(source, separator(), time, separator(), age);
-  if (isNew) meta.append(el('span', 'badge badge-new', 'New'));
+  // Each separator ends the part before it, so a wrapped line never starts with "·".
+  const part = (...nodes) => {
+    const span = el('span', 'meta-part');
+    span.append(...nodes);
+    return span;
+  };
+  meta.append(part(source, separator()), part(time, separator()), age);
+  // "Just in" (landed while the page was open) outranks NEW. Both drop once the row is read (CSS).
+  if (ctx.isArrived?.(item)) {
+    const badge = el('span', 'badge badge-new badge-arrived', 'Just in');
+    badge.title = 'Arrived while this page was open';
+    meta.append(badge);
+  } else if (isNew) meta.append(el('span', 'badge badge-new', 'New'));
   for (const term of item.watch) {
     const badge = el('span', 'badge badge-watch');
     badge.title = `Matches your watchlist term “${term}”`;
@@ -139,7 +170,13 @@ export function itemElement(item, ctx) {
   body.append(heading, meta);
   if (item.summary) {
     const summary = el('p', 'item-summary');
-    appendHighlighted(summary, item.summary, ctx);
+    const { start } = matchWindow(item, ctx);
+    if (start > 0) {
+      // The match that put this row here sits past the two visible lines: start the summary near it.
+      summary.classList.add('is-snippet');
+      summary.append('…');
+    }
+    appendHighlighted(summary, item.summary.slice(start), ctx);
     body.append(summary);
   } else {
     body.append(el('p', 'item-summary is-empty', 'No summary provided by the source.'));
@@ -161,6 +198,7 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
   let index = 0;
   let lastDay = null;
   let currentList = null;
+  let endNote = null;
 
   const observer = new IntersectionObserver(
     (records) => {
@@ -175,24 +213,33 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
     if (index < entries.length) observer.observe(sentinel);
   }
 
+  function section(title, detail, className = 'day') {
+    const node = el('section', className);
+    const header = el('h2', 'day-header');
+    header.append(el('span', 'day-title', title), el('span', 'day-detail', detail));
+    currentList = el('div', 'day-items');
+    node.append(header, currentList);
+    return node;
+  }
+
   function renderMore() {
-    if (!ctx || index >= entries.length) return;
+    if (!ctx) return;
     const end = Math.min(entries.length, index + pageSize);
     const fragment = document.createDocumentFragment();
     for (; index < end; index += 1) {
       const item = entries[index];
       const key = dayKey(item.publishedMs);
       if (key !== lastDay) {
-        const section = el('section', 'day');
         const label = dayLabel(item.publishedMs, ctx.now);
-        const header = el('h2', 'day-header');
-        header.append(el('span', 'day-title', label.title), el('span', 'day-detail', label.detail));
-        currentList = el('div', 'day-items');
-        section.append(header, currentList);
-        fragment.append(section);
+        fragment.append(section(label.title, label.detail));
         lastDay = key;
       }
       currentList.append(itemElement(item, ctx));
+    }
+    // The finish line, once the last page is on screen.
+    if (index >= entries.length && endNote) {
+      fragment.append(endNote);
+      endNote = null;
     }
     container.append(fragment);
     sentinel.hidden = index >= entries.length;
@@ -200,13 +247,27 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
   }
 
   return {
-    render(list, context) {
+    /**
+     * options.pinned: items shown first under their own header (watchlist hits in a briefing),
+     * with pinnedDetail beside the header and pinnedFooter (a Show all toggle) after them;
+     * options.lead: a node above everything (the briefing summary); options.end: a node after the
+     * last item (the caught-up marker).
+     */
+    render(list, context, { pinned = [], pinnedDetail = '', pinnedFooter = null, lead = null, end = null } = {}) {
       entries = list;
       ctx = context;
       index = 0;
       lastDay = null;
       currentList = null;
+      endNote = end;
       container.replaceChildren();
+      if (lead) container.append(lead);
+      if (pinned.length) {
+        const hits = section('Watchlist hits', pinnedDetail, 'day day-pinned');
+        for (const item of pinned) currentList.append(itemElement(item, ctx));
+        if (pinnedFooter) hits.append(pinnedFooter);
+        container.append(hits);
+      }
       renderMore();
     },
     get size() {
@@ -256,7 +317,7 @@ function checkRow({ attr, value, checked, label, count, dotClass, dotTitle, dotT
  * shown, mixed (indeterminate) when only some are, empty when none are or the category is hidden.
  * The count is what that category shows now. sourceState: Map(category -> { shown, total }).
  */
-export function renderCategories(list, categories, hidden, counts, sourceState = new Map()) {
+export function renderCategories(list, categories, hidden, counts, sourceState = new Map(), allCounts = counts) {
   list.replaceChildren(
     ...categories.map((category) => {
       const li = el('li');
@@ -267,10 +328,17 @@ export function renderCategories(list, categories, hidden, counts, sourceState =
         value: category,
         checked: visible && shown === total,
         label: category,
-        count: visible ? counts.get(category) ?? 0 : 0,
+        // Hidden (by its checkbox or all its sources): what showing it would add, never a misleading 0.
+        count: (visible ? counts : allCounts).get(category) ?? 0,
         dotClass: `cat-dot cat-${slug(category)}`,
       });
       const input = row.querySelector('input');
+      if (!visible) {
+        const count = row.querySelector('.count');
+        count.classList.add('is-hidden');
+        count.append(el('span', 'sr-only', ' hidden'));
+        count.title = `${count.firstChild.textContent} hidden by this filter`;
+      }
       input.indeterminate = visible && shown < total;
       if (input.indeterminate) row.title = `${shown} of ${total} ${category} sources shown`;
       li.append(row);
@@ -290,7 +358,7 @@ export function healthTitle(source, now) {
  * Sources grouped under collapsible headings. openGroups holds the groups the reader opened; a
  * group with a failing source or a partial selection opens by itself.
  */
-export function renderSources(container, sources, { hiddenSources, hiddenCategories, counts, now, openGroups }) {
+export function renderSources(container, sources, { hiddenSources, hiddenCategories, counts, now, openGroups, staleSince = null }) {
   const groups = new Map();
   for (const source of sources) {
     const key = `${source.category} › ${source.group}`;
@@ -301,8 +369,8 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
   for (const group of groups.values()) {
     const wrapper = el('details', 'source-group');
     wrapper.dataset.group = group.title;
-    wrapper.classList.toggle('is-muted', hiddenCategories.has(group.category));
     const categoryHidden = hiddenCategories.has(group.category);
+    wrapper.classList.toggle('is-muted', categoryHidden);
     // A hidden category shows none of its sources, whatever their own checkboxes say.
     const shown = categoryHidden ? 0 : group.sources.filter((s) => !hiddenSources.has(s.id)).length;
     const failing = group.sources.filter((s) => s.status !== 'ok').length;
@@ -320,6 +388,9 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
     for (const source of group.sources) {
       const li = el('li', 'source-row');
       li.classList.toggle('is-error', source.status !== 'ok');
+      // Stale data: a source that answered at the last sweep may not answer now. Unknown, not healthy.
+      const unknown = staleSince != null && source.status === 'ok';
+      const unknownText = unknown ? `Answered at the last sweep, ${updatedLabel(staleSince, now)}. No refresh since, so its state now is unknown` : '';
       li.append(
         checkRow({
           attr: 'source',
@@ -327,9 +398,9 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
           checked: !hiddenSources.has(source.id),
           label: source.name,
           count: counts.get(source.id) ?? 0,
-          dotClass: `health-dot ${source.status === 'ok' ? 'is-ok' : 'is-error'}`,
-          dotTitle: healthTitle(source, now),
-          dotText: source.status === 'ok' ? 'answering' : `not answering: ${healthTitle(source, now)}`,
+          dotClass: `health-dot ${unknown ? 'is-unknown' : source.status === 'ok' ? 'is-ok' : 'is-error'}`,
+          dotTitle: unknown ? unknownText : healthTitle(source, now),
+          dotText: unknown ? `state unknown: ${unknownText}` : source.status === 'ok' ? 'answering' : `not answering: ${healthTitle(source, now)}`,
         }),
       );
       const only = el('button', 'only-btn', 'only');
@@ -345,17 +416,62 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
   container.replaceChildren(...nodes);
 }
 
-export function renderWatchTerms(list, terms) {
+/**
+ * Terms whose prefix form would catch more, gathered into one quiet line under the chips
+ * ("2 terms could catch more · Review"); Review lists each offer: "Zelensky → Zelensky* (+3)".
+ */
+export function renderWatchUpgrades(box, upgrades, open) {
+  box.replaceChildren();
+  box.hidden = upgrades.size === 0;
+  if (!upgrades.size) return;
+  const line = el('p', 'watch-upgrades-line', `${upgrades.size === 1 ? '1 term' : `${upgrades.size} terms`} could catch more. `);
+  const toggle = el('button', 'link-btn', open ? 'Hide' : 'Review');
+  toggle.type = 'button';
+  toggle.dataset.upgradesToggle = '';
+  toggle.setAttribute('aria-expanded', String(open));
+  line.append(toggle);
+  box.append(line);
+  if (!open) return;
+  const list = el('ul', 'watch-upgrades-list');
+  for (const [term, { variant, extra }] of upgrades) {
+    const li = el('li');
+    const offer = el('button', 'watch-upgrade');
+    offer.type = 'button';
+    offer.dataset.upgradeTerm = term;
+    offer.dataset.variant = variant;
+    offer.setAttribute('aria-label', `Change ${term} to ${variant} to catch ${extra} more`);
+    offer.append(`${term} → ${variant} `, el('span', 'watch-upgrade-extra', `+${extra}`));
+    li.append(offer);
+    list.append(li);
+  }
+  box.append(list, el('p', 'hint', 'A trailing * also matches longer words, such as other spellings.'));
+}
+
+/**
+ * Watchlist chips. Each is a filter: pressing it shows that term's hits alone (pressed again, all
+ * hits), with its hit count under the current category and source filters. The × removes the term.
+ */
+export function renderWatchTerms(list, terms, counts = new Map(), active = null) {
   list.replaceChildren(
     ...terms.map((term) => {
       const li = el('li', 'chip');
-      li.append(el('span', 'chip-label', term));
+      const count = counts.get(term) ?? 0;
+      const pressed = term === active;
+      li.classList.toggle('is-active', pressed);
+      li.classList.toggle('is-quiet', count === 0);
+      const filter = el('button', 'chip-filter');
+      filter.type = 'button';
+      filter.dataset.watchTerm = term;
+      filter.setAttribute('aria-pressed', String(pressed));
+      filter.setAttribute('aria-label', `${term}: ${count === 1 ? '1 hit' : `${count} hits`}`);
+      filter.title = pressed ? 'Showing only these hits: click to show all watchlist hits' : `Show only hits for ${term}`;
+      filter.append(el('span', 'chip-label', term), el('span', 'chip-count', String(count)));
       const remove = el('button', 'chip-remove');
       remove.type = 'button';
       remove.dataset.removeTerm = term;
       remove.setAttribute('aria-label', `Remove ${term} from watchlist`);
       remove.append(icon('close'));
-      li.append(remove);
+      li.append(filter, remove);
       return li;
     }),
   );

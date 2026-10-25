@@ -67,3 +67,7 @@ test('normalizeTerm tidies stars and a lone star is ignored', () => {
   assert.equal(buildMatcher(['*']), null);
   assert.deepEqual(buildMatcher(['C++']).match('C++ bug'), ['C++']);
 });
+
+test('addTerm rejects a lone star', () => {
+  assert.deepEqual(addTerm([], '***'), { terms: [], added: false });
+});

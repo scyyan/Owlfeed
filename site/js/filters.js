@@ -17,7 +17,7 @@ export function fold(text) {
 export function parseQuery(query) {
   const tokens = [];
   for (const m of String(query ?? '').matchAll(/"([^"]+)"(\*?)|(\S+)/g)) {
-    const raw = m[1] != null ? `${m[1].trim()}${m[2]}` : m[3];
+    const raw = m[1] != null ? `${m[1].trim()}${m[2]}` : m[3].replace(/^"+/, ''); // a quote still being typed is not part of the word
     const token = fold(raw).replace(/\*+$/, '*');
     if (token && token !== '*') tokens.push(token);
   }
@@ -62,7 +62,7 @@ export function matchesQuery(searchText, tokens) {
 
 /**
  * Apply view, category, source and search filters.
- * ctx: { view, hiddenCategories: Set, hiddenSources: Set, tokens, isRead(id), isNew(item), isSaved(id) }
+ * ctx: { view, hiddenCategories: Set, hiddenSources: Set, tokens, isRead(id), isNew(item), isSaved(id), watchTerm? }
  * Items need: id, source, category, searchText, watch (array of matched terms).
  */
 export function filterItems(items, ctx) {
@@ -81,6 +81,7 @@ export function filterItems(items, ctx) {
         break;
       case 'watchlist':
         if (!item.watch.length) return false;
+        if (ctx.watchTerm && !item.watch.includes(ctx.watchTerm)) return false; // one term's hits
         break;
       default:
         break;

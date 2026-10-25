@@ -74,7 +74,7 @@ test('prefs fall back to defaults when corrupted', () => {
   backend.setItem('owlfeed:v1:prefs', '{"view": 42, "hiddenSources": "nope"}');
   backend.setItem('owlfeed:v1:watchlist', 'not json');
   const store = createStorage(backend);
-  assert.deepEqual(store.prefs(), { view: 'all', hiddenCategories: [], hiddenSources: [] });
+  assert.deepEqual(store.prefs(), { view: 'all', hiddenCategories: [], hiddenSources: [], density: null, shortcuts: true });
   assert.deepEqual(store.watchlist(), []);
 });
 
@@ -165,4 +165,12 @@ test('setSaved reports whether a snapshot was stored', () => {
   const store = createStorage(new MemoryBackend());
   assert.equal(store.setSaved(SNAPSHOT), true);
   assert.equal(store.setSaved({ id: 'nope', title: 'x', url: 'ftp://x' }), false);
+});
+
+test('imported watchlist terms are cleaned up and de-duplicated', () => {
+  const target = createStorage(new MemoryBackend());
+  target.setWatchlist(['APT28']);
+  const result = target.importData({ app: 'owlfeed', watchlist: ['  Lazarus   Group ', 'lazarus group', '***', 'apt28', 'Russia **'] });
+  assert.equal(result.terms, 2);
+  assert.deepEqual(target.watchlist(), ['APT28', 'Lazarus Group', 'Russia*']);
 });

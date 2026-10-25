@@ -150,3 +150,9 @@ def test_check_fences_feed_text_from_workflow_commands(sources_file, monkeypatch
     assert start < end
     assert any(l.startswith("::warning title=Feed check::Example Blog (blog): HTTP 403") for l in lines[end:])
     assert not any(l.startswith("::warning") for l in lines[start:end])
+
+
+def test_summary_cells_neutralize_feed_text():
+    cell = cli._cell("[click](https://evil.example) | <b>x</b>")
+    assert "[click](" not in cell and "<b>" not in cell
+    assert r"\[click\]\(https://evil.example\) \|" in cell
