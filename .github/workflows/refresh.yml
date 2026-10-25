@@ -27,16 +27,18 @@ jobs:
       pages: read # configure-pages looks up the site's URL
       actions: read # find this workflow's previous run and its saved feed
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false  # nothing here pushes; keep the token off disk
       # No dependency cache here: caches can be written by other workflows on main.
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install dependencies (hash-pinned)
-        run: pip install --require-hashes -r requirements.txt
+        run: pip install --only-binary ':all:' --require-hashes -r requirements.txt
       - name: Configure Pages
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - name: Restore the saved copy of the feed
         # Only used if the live feed.json answers 404 (e.g. a Pages hiccup), so history survives.
         # It comes from this workflow's own last successful scheduled or push run on main: those
@@ -69,7 +71,7 @@ jobs:
           --fallback-file .state/feed.json
       - name: Keep a copy for the next run
         run: mkdir -p .state && cp site/data/feed.json .state/feed.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: feed-state
           path: .state/feed.json
@@ -81,7 +83,7 @@ jobs:
         # new ones (Pages lets browsers cache for ~10 minutes). The checkout is thrown away
         # after the run, so the repository itself is never stamped.
         run: python -m owlfeed stamp site
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: site
 
@@ -100,4 +102,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
