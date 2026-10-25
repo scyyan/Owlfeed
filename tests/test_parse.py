@@ -312,3 +312,21 @@ def test_a_title_of_invisible_characters_falls_back_to_the_summary():
     </channel></rss>"""
     (entry,) = parse_feed(feed, make_source("i"), Settings(), NOW)
     assert entry.title == "Researchers found a new loader in signed drivers this week."
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        b"YARA-X&amp;#;x26;#;39;s 1.22.0 release brings 11 improvements and 9 bugfixes.",
+        b"<![CDATA[YARA-X&#;x26;#;39;s 1.22.0 release brings 11 improvements and 9 bugfixes.]]>",
+    ],
+)
+def test_sans_isc_damaged_apostrophe_is_repaired(description):
+    feed = (
+        b'<?xml version="1.0"?><rss version="2.0"><channel><title>ISC</title><link>https://isc.sans.edu/</link>'
+        b"<item><title>YARA-X 1.22.0 Release</title><link>https://isc.sans.edu/diary/1</link>"
+        b"<pubDate>Wed, 14 Oct 2026 15:57:00 GMT</pubDate><description>" + description + b"</description></item>"
+        b"</channel></rss>"
+    )
+    [entry] = parse_feed(feed, make_source("sans"), Settings(), NOW)
+    assert entry.summary == "YARA-X's 1.22.0 release brings 11 improvements and 9 bugfixes."

@@ -30,6 +30,12 @@ MAX_HTML_CHARS = 64_000
 MAX_TEXT_CHARS = 16_000
 _BREAK_MARK = "\x00"  # where a <br> stood while a paragraph is collected
 _LEFTOVER_ENTITY = re.compile(r"&(?:#\d{1,7}|#x[0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});")
+# A reference whose ";" a broken escaper moved to just after "&#": "&#;x26;" for "&#x26;" (seen in
+# SANS ISC's feed). "&#;" is never valid, so the fix can't change correct text.
+_MOVED_SEMICOLON = re.compile(r"&#;(x[0-9a-f]{1,6}|\d{1,7});", re.IGNORECASE)
+# A reference written with its "&" escaped as a reference too: "&#x26;#39;" (or "&amp;#39;", or
+# with the moved semicolon, "&#x26;#;39;") is "&#39;", an apostrophe.
+_SPLIT_REFERENCE = re.compile(r"(?:&#x0*26;|&#0*38;|&amp;)#;?(x[0-9a-f]{1,6}|\d{1,7});", re.IGNORECASE)
 # Real markup that survived a first decoding pass, i.e. double-escaped HTML ("&lt;p&gt;…&lt;/p&gt;").
 # Only common content tags count, and a paragraph is parsed again only when it opens with such a tag
 # (or a complete comment) or closes one. Prose that names a tag ("inject a <pre> block",
@@ -264,8 +270,18 @@ def _parse_paragraphs(value: str, skip_tags: frozenset[str] = SKIP_TAGS, raw_tex
     parser = _ParagraphExtractor(skip_tags, raw_text)
     parser.feed(value)
     parser.close()
-    # Some feeds double-escape entities (e.g. "&amp;#8217;"); decode the leftovers once more.
-    return [_LEFTOVER_ENTITY.sub(lambda m: unescape(m.group(0)), p) for p in parser.paragraphs]
+    return [decode_leftovers(p) for p in parser.paragraphs]
+
+
+def decode_leftovers(text: str) -> str:
+    """Decode entities left in already-decoded text.
+
+    Some feeds escape entities twice (e.g. "&amp;#8217;"), escape a reference's "&" as a reference
+    of its own ("&#x26;#39;"), or even damage it ("&#;x26;#;39;"). Each is decoded once more.
+    """
+    text = _MOVED_SEMICOLON.sub(r"&#\1;", text)
+    text = _SPLIT_REFERENCE.sub(lambda m: unescape(f"&#{m.group(1)};"), text)
+    return _LEFTOVER_ENTITY.sub(lambda m: unescape(m.group(0)), text)
 
 
 def html_to_paragraphs(value: object) -> list[str]:
@@ -307,7 +323,7 @@ def clean_title(value: object, max_chars: int = 300, plain: bool = False) -> str
         # ("XSS via <img> tags", "<img src=x onerror=…>", "fixes <br>-handling flaw") stays.
         text = _drop_images(value, _is_stray_title_image)
         text = _ANY_BREAKS.sub(" ", text) if _has_stray_break(text) else text
-        text = collapse_whitespace(_LEFTOVER_ENTITY.sub(lambda m: unescape(m.group(0)), text))
+        text = collapse_whitespace(decode_leftovers(text))
     else:
         text = html_to_text(value)
     return truncate(_TITLE_DATE_SUFFIX.sub("", text), max_chars)
