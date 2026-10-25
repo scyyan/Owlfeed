@@ -10,6 +10,8 @@ const FEED_URL = 'data/feed.json';
 const POLL_MS = 5 * 60_000;
 const TICK_MS = 30_000;
 const RETRY_MS = 60_000; // after a failed load
+const FETCH_TIMEOUT_MS = 30_000;
+const MAX_BACKUP_BYTES = 5_000_000;
 const STALE_MS = 60 * 60_000;
 // The feed refreshes every 15 minutes; past this it is running late (but not yet stale).
 const AGING_MS = 30 * 60_000;
@@ -60,6 +62,8 @@ applyDefaultDensity();
 
 // Source groups the reader expanded this visit (collapsed by default to keep the sidebar short).
 const openGroups = new Set();
+// Groups the reader closed: kept closed even when a failing source would open them.
+const closedGroups = new Set();
 
 // Snapshots of items un-starred this session, so starring one again still works after it
 // has dropped out of the feed.
@@ -94,6 +98,11 @@ function startVisit() {
   storage.invalidate('lastVisit');
   state.baseline = parseTime(storage.lastVisit()); // NaN on a first visit: set from the first data
   state.firstVisit = false;
+  if (!Number.isFinite(state.baseline) && state.data) {
+    // Still no build ever seen (it all loaded while the tab was hidden): keep the first-visit window.
+    state.baseline = parseTime(state.data.generated_at) - FIRST_VISIT_MS;
+    state.firstVisit = Number.isFinite(state.baseline);
+  }
   writeSession();
 }
 
@@ -195,6 +204,8 @@ function applyWatch(items) {
 }
 
 function recomputeWatch() {
+  // The one-term filter goes with its term (removed here, in another tab or by a restore).
+  if (state.watchTerm && !state.terms.includes(state.watchTerm)) state.watchTerm = null;
   state.matcher = buildMatcher(state.terms);
   applyWatch(state.items);
 }
@@ -230,20 +241,40 @@ function applyData(data) {
 }
 
 async function fetchFeed() {
-  const response = await fetch(`${FEED_URL}?t=${Date.now()}`, { cache: 'no-store' });
-  if (!response.ok) {
-    const error = new Error(`HTTP ${response.status}`);
-    error.status = response.status;
-    throw error;
-  }
-  let data;
+  // A request that hangs must not hold up every later check (or overlap the next one).
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    data = await response.json();
-  } catch {
-    throw new Error('the feed file is damaged');
+    let response;
+    try {
+      response = await fetch(`${FEED_URL}?t=${Date.now()}`, { cache: 'no-store', signal: controller.signal });
+    } catch (error) {
+      throw controller.signal.aborted ? new Error('the request timed out') : error;
+    }
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error(controller.signal.aborted ? 'the request timed out' : 'the feed file is damaged');
+    }
+    if (!data || data.version !== 1 || !Array.isArray(data.items)) throw new Error('the feed file is in an unknown format');
+    return data;
+  } finally {
+    clearTimeout(timer);
   }
-  if (!data || data.version !== 1 || !Array.isArray(data.items)) throw new Error('the feed file is in an unknown format');
-  return data;
+}
+
+/** Whether build `data` is newer than build `than` (by generated_at; unreadable dates: just different). */
+function isNewerBuild(data, than) {
+  const next = parseTime(data.generated_at);
+  const current = parseTime(than.generated_at);
+  if (Number.isFinite(next) && Number.isFinite(current)) return next > current;
+  return data.generated_at !== than.generated_at;
 }
 
 async function loadInitial() {
@@ -287,26 +318,38 @@ function arrivalLabel(arrivals) {
   return `${arrivals.length} just arrived${hits ? ` · ${plural(hits, 'watchlist hit')}` : ''}`;
 }
 
-/** Fetch the feed again. Returns 'failed', 'same' (no newer build), 'applied' or 'held' (behind the pill). */
-async function poll() {
+/**
+ * Fetch the feed again. Resolves to { result, arrivals }: result is 'failed', 'same' (no newer
+ * build), 'applied' or 'held' (behind the pill); arrivals counts the new items this view shows.
+ * Only one fetch runs at a time: a second caller (Check now during a tick) shares it.
+ */
+let pollInFlight = null;
+function poll() {
+  pollInFlight ??= pollOnce().finally(() => {
+    pollInFlight = null;
+  });
+  return pollInFlight;
+}
+
+async function pollOnce() {
   if (!state.data) {
     await loadInitial();
-    return state.data ? 'applied' : 'failed';
+    return { result: state.data ? 'applied' : 'failed', arrivals: 0 };
   }
   state.lastFetch = Date.now();
   let data;
   try {
     data = await fetchFeed();
   } catch {
-    return 'failed'; // keep showing what we have; the next tick tries again
+    return { result: 'failed', arrivals: 0 }; // keep showing what we have; the next tick tries again
   }
-  const latest = state.pending ?? state.data;
-  if (data.generated_at === latest.generated_at) return 'same';
+  // Never step back: a slow answer (or a lagging CDN copy) can carry an older build.
+  if (!isNewerBuild(data, state.pending ?? state.data)) return { result: 'same', arrivals: 0 };
   const arrivals = visibleArrivals(data);
   if (window.scrollY < AT_TOP_PX) {
     applyData(data);
     if (arrivals.length) announce(arrivalLabel(arrivals));
-    return 'applied';
+    return { result: 'applied', arrivals: arrivals.length };
   }
   state.pending = data;
   renderHeader();
@@ -315,7 +358,7 @@ async function poll() {
     $('new-pill').setAttribute('aria-label', `Show ${plural(arrivals.length, 'item')} that just arrived`);
     $('new-pill').hidden = false;
   }
-  return 'held';
+  return { result: 'held', arrivals: arrivals.length };
 }
 
 /** "Check now" in the watch report: fetch at once, and say what came back. */
@@ -323,13 +366,18 @@ async function checkNow() {
   if (state.checking) return;
   state.checking = true;
   renderWatch(freshness());
-  const result = await poll();
+  const { result, arrivals } = await poll();
   state.checking = false;
   const fresh = freshness();
   renderWatch(fresh);
   if (result === 'failed') announce("Couldn't reach the feed. This page tries again on its own.");
-  else if (result === 'held') announce('A newer update is ready above the timeline');
-  else if (result === 'same' && fresh) {
+  else if (result === 'held') {
+    announce(arrivals
+      ? 'A newer update is ready above the timeline'
+      : 'A newer update came in with nothing new for this view. It shows when you scroll to the top.');
+  } else if (result === 'applied' && !arrivals && fresh) {
+    announce(`Updated: nothing new for this view. The feed was ${fresh.label.toLowerCase()}`);
+  } else if (result === 'same' && fresh) {
     announce(fresh.stale
       ? `No newer update yet: the feed was last ${fresh.label.toLowerCase()}`
       : `Up to date: ${fresh.label.toLowerCase()}`);
@@ -389,6 +437,8 @@ function renderContext() {
 
 // ── Rendering ───────────────────────────────────────────────────────────────
 function renderAll() {
+  // Whether a whole-word search needs its prefix form depends on the view and data: decide again.
+  if (state.query) setQuery(state.query);
   renderSidebar();
   renderHeader();
   renderFeed();
@@ -455,7 +505,7 @@ function renderFeed() {
       pinnedDetail: pinnedDetail(hits.length),
       pinnedFooter: hits.length > PINNED_LIMIT ? pinnedToggle(hits.length) : null,
       lead: briefingSummary(list, hits),
-      end: caughtUpNote(list),
+      end: () => caughtUpNote(), // built when the last page is drawn, so its counts are current
       minCount,
     });
   } else {
@@ -587,7 +637,18 @@ function refreshBriefing(list) {
   const end = feed.querySelector('.caught-up');
   if (!lead && !end) return;
   list ??= visibleItems();
-  if (lead) lead.replaceWith(briefingSummary(list, list.filter((item) => item.watch.length)));
+  if (lead) {
+    // Keep focus on the same summary button (it is redrawn after every read).
+    const focused = lead.contains(document.activeElement) ? document.activeElement.closest('button') : null;
+    const next = briefingSummary(list, list.filter((item) => item.watch.length));
+    lead.replaceWith(next);
+    if (focused) {
+      const same = [...next.querySelectorAll('button')].find(
+        (button) => button.dataset.feedAction === focused.dataset.feedAction && button.dataset.onlyCategory === focused.dataset.onlyCategory,
+      );
+      (same ?? next.querySelector('button'))?.focus({ preventScroll: true });
+    }
+  }
   if (end) {
     const hadFocus = end.contains(document.activeElement);
     const next = caughtUpNote(list);
@@ -600,16 +661,21 @@ function scrollToFeedTop() {
   if (window.scrollY > 0) window.scrollTo({ top: 0 });
 }
 
+/** Hidden sources that are still in the feed (prefs can name sources since removed from it). */
+function hiddenKnownSources() {
+  return state.prefs.hiddenSources.filter((id) => state.sourcesById.has(id));
+}
+
 function hasFilters() {
   return Boolean(
-    state.prefs.hiddenCategories.length || state.prefs.hiddenSources.length || state.tokens.length || state.watchTerm,
+    state.prefs.hiddenCategories.length || hiddenKnownSources().length || state.tokens.length || state.watchTerm,
   );
 }
 
 function emptyStateFor() {
   const view = state.prefs.view;
   // Only the search is narrowing things down: say so, and clear just that.
-  const searchOnly = state.tokens.length && !state.prefs.hiddenCategories.length && !state.prefs.hiddenSources.length && !state.watchTerm;
+  const searchOnly = state.tokens.length && !state.prefs.hiddenCategories.length && !hiddenKnownSources().length && !state.watchTerm;
   const clear = searchOnly ? { id: 'clear-search', label: 'Clear search' } : { id: 'clear', label: 'Clear filters' };
   const hiddenByFilters =
     hasFilters() && filterItems(itemsForView(view), filterContext(view, [], { unfiltered: true })).length > 0;
@@ -914,7 +980,9 @@ function renderWatch(fresh, now = Date.now()) {
 function renderWatchPanel(fresh = freshness(), failing = state.sources.filter((s) => s.status !== 'ok'), now = Date.now()) {
   if (!fresh) return;
   const panel = $('watch-panel');
-  const hadFocus = panel.contains(document.activeElement) ? document.activeElement.dataset.checkNow != null : false;
+  // The panel redraws every 30 seconds: note which of its controls had focus, to put it back.
+  const active = panel.contains(document.activeElement) ? document.activeElement : null;
+  const focusedControl = active?.dataset.checkNow != null ? 'check' : active?.dataset.ownerLink != null ? 'owner' : null;
   const answered = `${state.sources.length - failing.length} of ${state.sources.length} answered`;
   const rows = [
     ['Last sweep', `${new Date(fresh.generated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · ${updatedLabel(fresh.generated, now)}`],
@@ -959,7 +1027,8 @@ function renderWatchPanel(fresh = freshness(), failing = state.sources.filter((s
   nodes.push(legend);
   if (fresh.stale || fresh.aging) nodes.push(ownerHint());
   panel.replaceChildren(...nodes);
-  if (hadFocus) check.focus({ preventScroll: true }); // the panel redraws every 30 seconds
+  if (focusedControl === 'check') check.focus({ preventScroll: true });
+  else if (focusedControl === 'owner') panel.querySelector('[data-owner-link]')?.focus({ preventScroll: true });
 }
 
 /**
@@ -976,6 +1045,7 @@ function ownerHint() {
     link.href = `https://github.com/${owner}/${repo}/actions/workflows/refresh.yml`;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
+    link.dataset.ownerLink = '';
     hint.append(link, '. GitHub pauses schedules in quiet repositories; see the README.');
   } else {
     hint.append('Check the “Refresh feed” workflow in the repository’s Actions tab, and the README’s troubleshooting notes.');
@@ -1062,9 +1132,10 @@ function renderSidebar() {
     counts: countBy(matching, 'source'),
     now,
     openGroups,
+    closedGroups,
     staleSince: fresh?.stale ? fresh.generated : null,
   });
-  $('sources-reset').hidden = !state.prefs.hiddenSources.length;
+  $('sources-reset').hidden = !hiddenKnownSources().length;
   // Each term's hits in the current view (New, Unread...), filters and search, so a chip agrees with
   // the briefing summary beside it. In the Watchlist hits view that is every hit.
   const view = state.prefs.view === 'watchlist' ? 'all' : state.prefs.view;
@@ -1121,7 +1192,7 @@ function renderHeader() {
 // Keep keyboard focus on the same sidebar control when the sidebar is rebuilt.
 function focusKey(node) {
   if (!node?.dataset) return null;
-  for (const attr of ['category', 'source', 'only', 'removeTerm', 'watchTerm']) {
+  for (const attr of ['category', 'source', 'only', 'removeTerm', 'watchTerm', 'groupSummary']) {
     if (node.dataset[attr] != null) return [attr, node.dataset[attr]];
   }
   return null;
@@ -1327,6 +1398,11 @@ function scheduleToastHide(ms) {
  * button (e.g. Undo) and stays up longer; without one it is decorative, and only the live region speaks.
  */
 function announce(message, action = null) {
+  if (!action && toastAction && $('status').contains(document.activeElement)) {
+    // The reader is on the toast's button (Undo): keep it, and only speak the news.
+    $('announcer').textContent = message;
+    return;
+  }
   $('announcer').textContent = action ? `${message}. ${action.label} is available in the message at the bottom of the page.` : message;
   const toast = $('status');
   $('status-text').textContent = message;
@@ -1508,6 +1584,10 @@ function applyStoredPrefs() {
 }
 
 async function importSettings(file) {
+  if (file.size > MAX_BACKUP_BYTES) {
+    announce(`Couldn't restore: the file is over ${MAX_BACKUP_BYTES / 1_000_000} MB, far larger than any Owlfeed backup`);
+    return;
+  }
   let data;
   try {
     data = JSON.parse(await file.text());
@@ -1518,7 +1598,10 @@ async function importSettings(file) {
   try {
     const result = storage.importData(data);
     reloadFromStorage();
-    announce(`Restored: ${plural(result.saved, 'saved item')} and ${plural(result.terms, 'watchlist term')} added`);
+    const added = `${plural(result.saved, 'saved item')} and ${plural(result.terms, 'watchlist term')} added`;
+    announce(result.persisted
+      ? `Restored: ${added}`
+      : `Restored for this visit only: ${added}, but this browser's storage is full or blocked, so they won't be kept`);
   } catch (error) {
     announce(`Couldn't restore: ${error.message}`);
   }
@@ -1604,8 +1687,13 @@ function wireEvents() {
     const summary = event.target.closest('summary');
     const group = summary?.parentElement?.dataset.group;
     if (group == null) return;
-    if (summary.parentElement.open) openGroups.delete(group); // about to close
-    else openGroups.add(group);
+    if (summary.parentElement.open) {
+      openGroups.delete(group); // about to close
+      closedGroups.add(group);
+    } else {
+      openGroups.add(group);
+      closedGroups.delete(group);
+    }
   });
 
   $('sources-reset').addEventListener('click', () => {
@@ -2078,13 +2166,14 @@ if (/Mac|iPhone|iPad/.test(navigator.userAgentData?.platform ?? navigator.platfo
   for (const id of ['undo-mod', 'undo-mod-2']) $(id).textContent = '⌘';
 }
 syncSearchPlaceholder();
-phone.addEventListener('change', () => {
-  syncSearchPlaceholder();
-  if (state.data) renderAll(); // the view token appears or goes with the tab bar
-});
+// Only the placeholder depends on this width (the view token follows `narrow`, which redraws), so
+// rotating a phone doesn't rebuild the feed.
+phone.addEventListener('change', syncSearchPlaceholder);
 midWidth.addEventListener('change', syncSearchPlaceholder);
 wireEvents();
 loadInitial();
 setInterval(tick, TICK_MS);
 // Tells js/boot-check.js the app is up, so it never replaces the page with its failure message.
 document.documentElement.dataset.app = 'ready';
+// If the backstop fired before a very slow start finished, take back what it told screen readers.
+if ($('announcer').textContent.startsWith('Owlfeed couldn’t start')) $('announcer').textContent = '';

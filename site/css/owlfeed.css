@@ -507,8 +507,15 @@ kbd {
   align-items: center;
 }
 
-.source-group.is-muted {
-  opacity: 0.5;
+/* A hidden category: its sources step back, but stay readable (AA) and operable. Opacity
+   would have dropped the text to about 2:1. */
+.source-group.is-muted,
+.source-group.is-muted * {
+  color: var(--muted);
+}
+
+.source-group.is-muted .health-dot {
+  filter: grayscale(0.8);
 }
 
 .only-btn {
@@ -2507,4 +2514,15 @@ html:not([data-app]) .loading {
     outline: 2px solid Highlight;
     outline-offset: -2px;
   }
+}
+
+/* Framed by another site (see js/theme-init.js): show only the way out. */
+html[data-framed] body > :not(.framed-note) {
+  display: none !important;
+}
+
+html[data-framed] .framed-note {
+  display: block !important; /* outranks the [hidden] rule above */
+  margin: 2rem 16px;
+  color: var(--text);
 }

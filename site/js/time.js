@@ -34,8 +34,17 @@ export function updatedLabel(ms, now = Date.now()) {
   return `${days} ${days === 1 ? 'day' : 'days'} ago`;
 }
 
+// Building an Intl formatter is far slower than using one, and every row needs two.
+const formatters = new Map();
+function formatter(kind, locale, options) {
+  const key = `${kind}|${locale ?? ''}`;
+  let format = formatters.get(key);
+  if (!format) formatters.set(key, (format = new Intl.DateTimeFormat(locale, options)));
+  return format;
+}
+
 export function clockTime(ms, locale) {
-  return new Date(ms).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+  return formatter('clock', locale, { hour: 'numeric', minute: '2-digit' }).format(new Date(ms));
 }
 
 /**
@@ -43,6 +52,7 @@ export function clockTime(ms, locale) {
  * "Fri 9:58 PM" within the past week, and "Oct 14, 9:58 PM" beyond that.
  */
 export function momentLabel(ms, now = Date.now(), locale) {
+  ms = Math.min(ms, now); // a few minutes ahead (clock skew) is still "now", not tomorrow
   const days = Math.round((startOfDay(now) - startOfDay(ms)) / DAY);
   const clock = clockTime(ms, locale);
   if (days <= 0) return clock;
@@ -52,7 +62,7 @@ export function momentLabel(ms, now = Date.now(), locale) {
 }
 
 export function fullTime(ms, locale) {
-  return new Date(ms).toLocaleString(locale, {
+  return formatter('full', locale, {
     weekday: 'short',
     year: 'numeric',
     month: 'short',
@@ -60,7 +70,7 @@ export function fullTime(ms, locale) {
     hour: 'numeric',
     minute: '2-digit',
     timeZoneName: 'short',
-  });
+  }).format(new Date(ms));
 }
 
 /** Local calendar day as YYYY-MM-DD, used to group items under day headers. */
@@ -81,6 +91,7 @@ function startOfDay(ms) {
  * title already names the weekday, the detail leaves it out ("Monday · Oct 13", not "Monday Mon, Oct 13").
  */
 export function dayLabel(ms, now = Date.now(), locale) {
+  ms = Math.min(ms, now); // an item a few minutes "in the future" belongs to today, not tomorrow
   const days = Math.round((startOfDay(now) - startOfDay(ms)) / DAY);
   const sameYear = new Date(ms).getFullYear() === new Date(now).getFullYear();
   const detail = new Date(ms).toLocaleDateString(locale, {

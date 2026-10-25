@@ -3,7 +3,10 @@
 // If the app hasn't said it started, the endless "Loading…" becomes a message and a Reload button.
 (function () {
   var root = document.documentElement;
-  var GRACE_MS = 10000;
+  // Normally the verdict comes once the app's module has run (its 'load' event, below). This timer
+  // is only a backstop for a load that never finishes, so it is generous: a slow connection can take
+  // a while to fetch every module, and that is not a failure.
+  var BACKSTOP_MS = 60000;
   var shown = false;
 
   function started() {
@@ -56,5 +59,15 @@
     },
     true
   );
-  setTimeout(fail, GRACE_MS);
+  // A module script fires 'load' after it has run (with its imports). If the app is still not up
+  // by then, it threw while starting.
+  window.addEventListener(
+    'load',
+    function (event) {
+      var target = event.target;
+      if (target && target.tagName === 'SCRIPT' && target.type === 'module' && !started()) setTimeout(fail, 300);
+    },
+    true
+  );
+  setTimeout(fail, BACKSTOP_MS);
 })();

@@ -22,9 +22,12 @@ export function fold(text) {
 export function parseQuery(query) {
   const tokens = [];
   for (const m of String(query ?? '').matchAll(/"([^"]+)"(\*?)|(\S+)/g)) {
-    const raw = m[1] != null ? `${m[1].trim()}${m[2]}` : m[3].replace(/^"+/, ''); // a quote still being typed is not part of the word
+    // A bare word loses brackets and sentence punctuation around it ("ransomware." finds
+    // "ransomware"); a quote still being typed is not part of the word either.
+    const raw = m[1] != null ? `${m[1].trim()}${m[2]}` : m[3].replace(/^["(\[{]+/, '').replace(/[,.;:!?)\]}]+(\**)$/, '$1');
     const token = fold(raw).replace(/\*+$/, '*');
-    if (token && token !== '*') tokens.push(token);
+    // Punctuation alone ("Russia - Ukraine", "&") can never be a whole word: ignore it.
+    if (/[\p{L}\p{N}]/u.test(token)) tokens.push(token);
   }
   return tokens;
 }
@@ -105,9 +108,24 @@ export function sortItems(items) {
  * Uses the same folding and word rule as the search, so "cafe" highlights "Café" and what is
  * highlighted is exactly what matched.
  */
+// Each row asks for the same text's ranges more than once (to place the snippet, then to
+// highlight it), so the last few answers are kept.
+const rangeMemo = new Map();
+const RANGE_MEMO_SIZE = 8;
+
 export function queryRanges(text, tokens) {
   const source = String(text ?? '');
   if (!tokens?.length || !source) return [];
+  const key = `${tokens.join('\u0000')}\u0001${source}`;
+  const known = rangeMemo.get(key);
+  if (known) return known.map((range) => [...range]);
+  const ranges = computeRanges(source, tokens);
+  if (rangeMemo.size >= RANGE_MEMO_SIZE) rangeMemo.delete(rangeMemo.keys().next().value);
+  rangeMemo.set(key, ranges);
+  return ranges.map((range) => [...range]);
+}
+
+function computeRanges(source, tokens) {
   let folded = '';
   const origin = []; // origin[i]: index in `source` of the character that produced folded[i]
   let index = 0;

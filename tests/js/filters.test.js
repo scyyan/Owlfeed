@@ -138,3 +138,19 @@ test('a quote still being typed does not empty the search', () => {
   assert.deepEqual(parseQuery('"volt ty'), ['volt', 'ty']);
   assert.deepEqual(parseQuery('"volt typhoon"'), ['volt typhoon']);
 });
+
+test('punctuation around words is ignored, and punctuation alone is no token', () => {
+  assert.deepEqual(parseQuery('Russia - Ukraine'), ['russia', 'ukraine']);
+  assert.deepEqual(parseQuery('Russia & Ukraine'), ['russia', 'ukraine']);
+  assert.deepEqual(parseQuery('lockbit, ransomware.'), ['lockbit', 'ransomware']);
+  assert.deepEqual(parseQuery('(Kiev) ransom*,'), ['kiev', 'ransom*']);
+  assert.deepEqual(parseQuery('C++ u.s.'), ['c++', 'u.s']);
+  assert.equal(matchesQuery(fold('Talks between the U.S. and Iran'), parseQuery('u.s.')), true);
+});
+
+test('queryRanges hands out copies, so callers cannot spoil later answers', () => {
+  const tokens = parseQuery('cafe');
+  const first = queryRanges('Café attack', tokens);
+  first[0][1] = 99;
+  assert.deepEqual(queryRanges('Café attack', tokens), [[0, 4]]);
+});

@@ -1153,7 +1153,7 @@ def test_a_started_app_never_shows_the_failure_message(page, server):
     page.clock.install()
     open_dashboard(page, server)
     assert page.evaluate("document.documentElement.dataset.app") == "ready"
-    page.clock.run_for(11_000)  # past the watchdog's grace period
+    page.clock.run_for(61_000)  # past the watchdog's backstop
     expect(page.locator(".empty-title", has_text="Owlfeed couldn’t start")).to_have_count(0)
 
 
@@ -1394,3 +1394,90 @@ def test_a_huge_watchlist_backup_is_capped_and_the_app_keeps_working(page, serve
     expect(page.locator("article.item").first).to_be_visible()
     expect(page.locator(".chip-label")).to_have_count(MAX_TERMS)
     assert page.js_errors == []
+
+
+def test_an_older_build_never_replaces_a_newer_one(make_page, server):
+    page = make_page()
+    page.clock.install(time=NOW)
+    open_dashboard(page, server)
+    server.write_feed(build_feed(extra_items=[breaking_item()], generated_at=NOW + timedelta(minutes=5)))
+    page.clock.run_for(5 * 60_000 + 31_000)
+    expect(item(page, "Breaking: sample item")).to_be_visible()
+    # A lagging copy (or a slow answer) carries an older build: it must not undo the newer one.
+    server.write_feed(build_feed(generated_at=NOW + timedelta(minutes=1)))
+    page.clock.run_for(5 * 60_000 + 31_000)
+    expect(item(page, "Breaking: sample item")).to_be_visible()
+
+
+def test_check_now_says_when_a_newer_build_brings_nothing_new(page, server):
+    open_dashboard(page, server)
+    server.write_feed(build_feed(generated_at=NOW + timedelta(minutes=1)))
+    page.locator("#watch-btn").click()
+    page.get_by_role("button", name="Check now").click()
+    expect(page.locator("#announcer")).to_contain_text("Updated: nothing new for this view")
+
+
+def test_the_finish_line_counts_reads_made_after_the_list_was_drawn(page, server):
+    server.write_feed(build_feed(extra_items=many_items(100)))
+    open_dashboard(page, server)
+    page.locator('[data-view="unread"]').click()
+    total = page.evaluate("Number(document.querySelector('[data-view=\"unread\"] .count').textContent)")
+    for row in range(3):
+        page.locator('article.item [data-action="read"]').nth(row).click()
+    for _ in range(10):  # scroll until the last page and its finish line are drawn
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        if page.locator(".caught-up").count():
+            break
+        page.wait_for_timeout(100)
+    expect(page.locator(".caught-up")).to_contain_text(f"{total - 3} unread items")
+    expect(page.locator(".caught-up").get_by_role("button")).to_have_text(f"Mark these {total - 3} read")
+
+
+def test_news_does_not_take_a_focused_undo_button_away(make_page, server):
+    page = make_page()
+    page.clock.install(time=NOW)
+    open_dashboard(page, server)
+    page.locator("#mark-all-read").focus()
+    page.keyboard.press("Enter")
+    expect(page.locator("#status-action")).to_be_focused()
+    server.write_feed(build_feed(extra_items=[breaking_item()], generated_at=NOW + timedelta(minutes=5)))
+    page.clock.run_for(5 * 60_000 + 31_000)
+    expect(item(page, "Breaking: sample item")).to_be_visible()
+    expect(page.locator("#status-action")).to_be_focused()
+    expect(page.locator("#announcer")).to_contain_text("1 just arrived")
+
+
+def test_a_group_the_reader_closed_stays_closed_and_keeps_focus(make_page, server):
+    page = make_page()
+    page.clock.set_fixed_time(NOW)
+    open_dashboard(page, server)
+    failing_group = page.locator(".source-group", has=page.locator(".source-row", has_text="Sample Security News"))
+    expect(failing_group).to_have_attribute("open", "")
+    failing_group.locator("summary").click()
+    expect(failing_group).not_to_have_attribute("open", "")
+    failing_group.locator("summary").focus()
+    # Another tab marks an item read: this tab's sidebar is rebuilt.
+    other = page.context.new_page()
+    other.clock.set_fixed_time(NOW)
+    open_dashboard(other, server)
+    other.locator('article.item [data-action="read"]').first.click()
+    wait_until(page, "document.querySelector('[data-view=\"unread\"] .count').textContent !== String(%d)" % len(ITEMS))
+    expect(failing_group).not_to_have_attribute("open", "")
+    assert page.evaluate("document.activeElement.dataset.groupSummary") is not None
+
+
+def test_a_hidden_source_that_left_the_feed_is_not_a_filter(page, server):
+    page.add_init_script(
+        "localStorage.setItem('owlfeed:v1:prefs', JSON.stringify({ view: 'all', hiddenCategories: [], hiddenSources: ['long-gone'] }));"
+    )
+    open_dashboard(page, server)
+    expect(page.locator("#sources-reset")).to_be_hidden()
+
+
+def test_the_page_hides_itself_inside_another_sites_frame(page, server):
+    (server.root / "framer.html").write_text('<!doctype html><iframe src="./" width="800" height="600"></iframe>', encoding="utf-8")
+    page.goto(server.url + "framer.html")
+    frame = page.frame_locator("iframe")
+    expect(frame.locator(".framed-note")).to_be_visible()
+    expect(frame.locator(".framed-note a")).to_have_attribute("target", "_blank")
+    expect(frame.locator("#feed")).to_be_hidden()

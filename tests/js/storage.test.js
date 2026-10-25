@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { createStorage } from '../../site/js/storage.js';
+import { createStorage, MAX_IMPORT_ENTRIES } from '../../site/js/storage.js';
 import { MAX_TERMS } from '../../site/js/watchlist.js';
 
 class MemoryBackend {
@@ -109,7 +109,7 @@ test('export and import round trip merges without duplicates', () => {
   const target = createStorage(new MemoryBackend());
   target.updateWatchlist(() => ['apt28']);
   const result = target.importData(backup);
-  assert.deepEqual(result, { terms: 1, saved: 1 });
+  assert.deepEqual(result, { terms: 1, saved: 1, persisted: true });
   assert.deepEqual(target.watchlist(), ['apt28', 'Volt Typhoon']);
   assert.ok(target.isSaved('a1') && target.isRead('r1'));
   assert.equal(target.prefs().view, 'unread');
@@ -200,4 +200,42 @@ test('damaged saved entries are skipped instead of breaking the app', () => {
   assert.deepEqual(store.savedItems().map((s) => s.id), ['a1']);
   assert.equal(store.isSaved('a'), false);
   assert.equal(store.isSaved('a1'), true);
+});
+
+test('read marks on saved items outlive the read retention window', () => {
+  const store = createStorage(new MemoryBackend());
+  store.setSaved(SNAPSHOT);
+  const old = Date.parse('2026-08-01T00:00:00Z');
+  store.setRead(['a1', 'gone'], true, old);
+  store.pruneRead(Date.parse('2026-10-15T00:00:00Z'));
+  assert.equal(store.isRead('a1'), true);
+  assert.equal(store.isRead('gone'), false);
+});
+
+test('a restore says when storage refused it', () => {
+  class FullBackend extends MemoryBackend {
+    setItem(key, value) {
+      if (String(value).length > 20) throw new Error('QuotaExceededError');
+      super.setItem(key, value);
+    }
+  }
+  const store = createStorage(new FullBackend());
+  const result = store.importData({ app: 'owlfeed', saved: { a1: SNAPSHOT } });
+  assert.equal(result.saved, 1);
+  assert.equal(result.persisted, false);
+  assert.equal(store.isSaved('a1'), true); // still there for this visit
+});
+
+test('a restore ignores built-in names, clamps future read marks and caps its size', () => {
+  const store = createStorage(new MemoryBackend());
+  const now = new Date('2026-10-15T14:00:00Z');
+  const read = { constructor: 5, toString: 6, r1: Date.parse('2030-01-01T00:00:00Z'), r2: 'x' };
+  for (let i = 0; i < MAX_IMPORT_ENTRIES + 10; i += 1) read[`k${i}`] = 1;
+  const saved = { constructor: { ...SNAPSHOT, id: 'constructor' }, toString: { ...SNAPSHOT, id: 'toString' }, a1: SNAPSHOT };
+  const result = store.importData({ app: 'owlfeed', read, saved }, now);
+  assert.equal(result.saved, 1);
+  assert.equal(store.isRead('constructor') || store.isRead('toString') || store.isRead('r2'), false);
+  const exported = store.exportData(now).read;
+  assert.equal(exported.r1, now.getTime());
+  assert.ok(Object.keys(exported).length <= MAX_IMPORT_ENTRIES);
 });
