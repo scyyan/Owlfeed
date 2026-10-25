@@ -18,6 +18,7 @@ SUMMARY_MODES = ("auto", "description", "content")
 SOURCE_KEYS = frozenset(
     {"id", "name", "feed", "site", "category", "group", "enabled", "summary_from", "exclude_title", "timezone"}
 )
+SETTINGS_KEYS = frozenset({"retention_days", "max_items_per_source", "summary_max_chars", "categories"})
 # Used when sources.yml has no settings.categories: category -> its sidebar groups.
 DEFAULT_CATEGORIES = {
     "Cyber": ("Government & CERT", "Threat research", "Security news"),
@@ -162,6 +163,9 @@ def parse_config(data: object) -> Config:
     raw_settings = data.get("settings") or {}
     if not isinstance(raw_settings, dict):
         raise ConfigError("settings must be a mapping")
+    unknown = sorted(str(key) for key in set(raw_settings) - SETTINGS_KEYS)
+    if unknown:
+        raise ConfigError(f"settings: unknown option(s) {', '.join(unknown)}")
     settings = Settings(
         retention_days=_int_setting(raw_settings, "retention_days", 7, 1, 90),
         max_items_per_source=_int_setting(raw_settings, "max_items_per_source", 50, 1, 500),

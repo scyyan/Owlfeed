@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +19,7 @@ import feedparser
 from .config import Config, ConfigError, Source, load_config
 from .fetch import fetch_all
 from .parse import Entry, FeedParseError, parse_feed
-from .stamp import stamp_site
+from .stamp import StampError, stamp_site
 from .store import (
     AllSourcesFailed,
     PreviousStateError,
@@ -42,6 +43,30 @@ def _now(value: str | None) -> datetime:
             raise SystemExit(f"--now must be an ISO 8601 timestamp, got {value!r}")
         return moment
     return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def _in_actions() -> bool:
+    return os.environ.get("GITHUB_ACTIONS") == "true"
+
+
+@contextmanager
+def _no_workflow_commands():
+    """On GitHub Actions, stop the runner treating output ("::error::", "::add-mask::" ...) as commands.
+
+    Feed text reaches the output in printed lines and in logged errors and tracebacks, so the fence
+    covers fetching and parsing too, and is closed again on every path.
+    """
+    if not _in_actions():
+        yield
+        return
+    resume = secrets.token_hex(16)
+    sys.stderr.flush()
+    print(f"::stop-commands::{resume}", flush=True)
+    try:
+        yield
+    finally:
+        sys.stderr.flush()
+        print(f"::{resume}::", flush=True)
 
 
 def collect(config: Config, sources: tuple[Source, ...], validators: dict, now: datetime) -> dict[str, SourceOutcome]:
@@ -69,6 +94,11 @@ def collect(config: Config, sources: tuple[Source, ...], validators: dict, now: 
 def cmd_build(args: argparse.Namespace) -> int:
     config = load_config(args.sources)
     now = _now(args.now)
+    with _no_workflow_commands():
+        return _build(args, config, now)
+
+
+def _build(args: argparse.Namespace, config: Config, now: datetime) -> int:
     try:
         if args.previous_url:
             previous = load_previous_url(args.previous_url)
@@ -86,7 +116,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         log.error("%s. Aborting so the live dashboard keeps its current data.", exc)
         return 2
 
-    outcomes = collect(config, config.enabled_sources, previous_validators(previous), now)
+    outcomes = collect(config, config.enabled_sources, previous_validators(previous, config.enabled_sources), now)
     for source in config.enabled_sources:
         outcome = outcomes[source.id]
         if outcome.error:
@@ -165,60 +195,16 @@ def cmd_check(args: argparse.Namespace) -> int:
     config = load_config(args.sources)
     now = _now(args.now)
     sources = config.sources if args.include_disabled else config.enabled_sources
-    outcomes = collect(config, sources, {}, now)
-    rows = []
-    for source in sources:
-        outcome = outcomes[source.id]
-        rows.append(CheckRow(source, outcome.result.status, outcome.entries, outcome.error))
-
-    in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
-    # Feed text is printed below; stop the Actions runner from treating any of it as a
-    # workflow command ("::error::", "::add-mask::" ...). Our own warnings go out afterwards.
-    resume = secrets.token_hex(16)
-    if in_actions:
-        print(f"::stop-commands::{resume}")
-    failures = 0
-    warnings: list[str] = []
-    print(f"Owlfeed feed check at {iso(now)}: {len(rows)} sources\n")
-    for row in rows:
-        entries = row.entries or []
-        row_ok = not row.error and bool(entries)
-        label = "OK  " if row_ok else ("FAIL" if row.error else "EMPTY")
-        if not row_ok and row.source.enabled:
-            failures += 1
-            warnings.append(f"{row.source.name} ({row.source.id}): {row.error or 'feed has no items'}")
-        flag = "" if row.source.enabled else " [disabled]"
-        newest = _newest(entries)
-        dated = sum(1 for e in entries if e.published)
-        print(
-            f"{label} {row.source.id}{flag} | {row.source.category} / {row.source.group} | "
-            f"HTTP {row.status} | {len(entries)} items ({dated} dated) | newest {_age(newest, now)}"
-            + (f" | ERROR: {row.error}" if row.error else "")
-        )
-        for entry in entries[: args.samples]:
-            stamp = iso(entry.published) if entry.published else "no date"
-            print(f"     - [{stamp}] {entry.title}")
-            print(f"       {entry.url}")
-            print(f"       {entry.summary or '(no summary)'}")
-        print()
-
-    enabled = [r for r in rows if r.source.enabled]
-    healthy = len(enabled) - failures
-    print(f"{healthy}/{len(enabled)} enabled sources healthy")
-
-    for source_id in args.inspect or []:
-        outcome = outcomes.get(source_id)
-        if outcome is None:
-            print(f"\n--inspect {source_id}: no such source")
-            continue
-        _inspect(source_id, outcome)
-
-    if in_actions:
-        print(f"::{resume}::")
+    # Feed text is printed (and may be logged) inside the fence; our own warnings go out after it.
+    with _no_workflow_commands():
+        rows, warnings = _check_report(args, config, sources, now)
+    if _in_actions():
         for warning in warnings:
             # Error text comes from our own code, but strip anything that could end the command early.
             print(f"::warning title=Feed check::{warning.replace('::', ': :').replace(chr(10), ' ')}")
 
+    enabled = [r for r in rows if r.source.enabled]
+    healthy = len(enabled) - len(warnings)
     if args.summary_file:
         lines = [
             "## Owlfeed feed check",
@@ -240,13 +226,58 @@ def cmd_check(args: argparse.Namespace) -> int:
             )
         with open(args.summary_file, "a", encoding="utf-8") as handle:
             handle.write("\n".join(lines) + "\n")
-    return 1 if args.strict and failures else 0
+    return 1 if args.strict and warnings else 0
+
+
+def _check_report(
+    args: argparse.Namespace, config: Config, sources: tuple[Source, ...], now: datetime
+) -> tuple[list[CheckRow], list[str]]:
+    """Fetch and print every source's health. Returns the rows and one warning per failing enabled source."""
+    outcomes = collect(config, sources, {}, now)
+    rows = []
+    for source in sources:
+        outcome = outcomes[source.id]
+        rows.append(CheckRow(source, outcome.result.status, outcome.entries, outcome.error))
+
+    warnings: list[str] = []
+    print(f"Owlfeed feed check at {iso(now)}: {len(rows)} sources\n")
+    for row in rows:
+        entries = row.entries or []
+        row_ok = not row.error and bool(entries)
+        label = "OK  " if row_ok else ("FAIL" if row.error else "EMPTY")
+        if not row_ok and row.source.enabled:
+            warnings.append(f"{row.source.name} ({row.source.id}): {row.error or 'feed has no items'}")
+        flag = "" if row.source.enabled else " [disabled]"
+        newest = _newest(entries)
+        dated = sum(1 for e in entries if e.published)
+        print(
+            f"{label} {row.source.id}{flag} | {row.source.category} / {row.source.group} | "
+            f"HTTP {row.status} | {len(entries)} items ({dated} dated) | newest {_age(newest, now)}"
+            + (f" | ERROR: {row.error}" if row.error else "")
+        )
+        for entry in entries[: args.samples]:
+            stamp = iso(entry.published) if entry.published else "no date"
+            print(f"     - [{stamp}] {entry.title}")
+            print(f"       {entry.url}")
+            print(f"       {entry.summary or '(no summary)'}")
+        print()
+
+    enabled = sum(1 for r in rows if r.source.enabled)
+    print(f"{enabled - len(warnings)}/{enabled} enabled sources healthy")
+
+    for source_id in args.inspect or []:
+        outcome = outcomes.get(source_id)
+        if outcome is None:
+            print(f"\n--inspect {source_id}: no such source")
+            continue
+        _inspect(source_id, outcome)
+    return rows, warnings
 
 
 def cmd_stamp(args: argparse.Namespace) -> int:
     try:
         version = stamp_site(Path(args.site))
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, StampError) as exc:
         log.error("%s", exc)
         return 2
     log.info("Stamped %s with version %s", args.site, version)
@@ -276,7 +307,8 @@ def main(argv: list[str] | None = None) -> int:
     check.set_defaults(func=cmd_check)
 
     stamp = commands.add_parser("stamp", help="version CSS/JS URLs in a site directory before publishing")
-    stamp.add_argument("site", nargs="?", default="site", help="the site directory to rewrite in place")
+    # Required: a default of "site" would rewrite the working tree, which must stay unstamped.
+    stamp.add_argument("site", help="the copy of the site directory to rewrite in place (not your working tree)")
     stamp.set_defaults(func=cmd_stamp)
 
     args = parser.parse_args(argv)

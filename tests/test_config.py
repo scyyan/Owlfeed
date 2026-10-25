@@ -62,6 +62,11 @@ def test_invalid_settings(settings):
         parse_config({"settings": settings, "sources": [source()]})
 
 
+def test_unknown_settings_are_rejected():
+    with pytest.raises(ConfigError, match=re.escape("settings: unknown option(s) retention_day")):
+        parse_config({"settings": {"retention_day": 30}, "sources": [source()]})
+
+
 def test_missing_or_malformed_file(tmp_path):
     with pytest.raises(ConfigError, match="cannot read"):
         load_config(tmp_path / "nope.yml")

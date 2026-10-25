@@ -30,6 +30,11 @@ Your watchlist, read and saved items live only in your browser. Nothing about th
 sent anywhere or stored in this repository. Use **Back up settings** and **Restore** at the
 bottom of the sidebar to move them to another device or browser.
 
+Browsers keep that data per site origin, and every GitHub Pages project of one account shares
+the origin `<account>.github.io`. Other project sites you publish there can therefore read it
+(your watchlist terms, for example). Publish only sites you trust under the same account, or give
+Owlfeed its own origin with a custom domain.
+
 ## How it works
 
 ```

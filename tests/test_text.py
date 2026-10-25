@@ -1,3 +1,4 @@
+import time
 from owlfeed.text import clean_title, html_to_text, make_summary, strip_boilerplate, summary_text, truncate
 
 
@@ -387,3 +388,70 @@ def test_nl2br_breaks_after_quotes_brackets_and_ellipses_are_cleaned():
         "Ransomware gang claims attack on hospital chain (update)"
     )
     assert clean_title("CISA: “Patch now”<br /> Ivanti flaw exploited", plain=True) == "CISA: “Patch now” Ivanti flaw exploited"
+
+
+def test_summaries_without_any_words_are_empty():
+    for raw in (" [&#8230;]", "<p>…</p>", "<p>[...]</p>", "<p>— · —</p>"):
+        assert summary_text(raw) == "", raw
+        assert make_summary({"summary": raw}, "auto", "Title", 320) == ""
+
+
+def test_invisible_characters_do_not_make_text_non_empty():
+    for blank in ("\u200b", "\u200c\u200d", "\u2060\ufeff", "\u00ad", "\u3164"):
+        assert clean_title(blank) == "", repr(blank)
+        assert clean_title(blank, plain=True) == "", repr(blank)
+    assert clean_title("<b>\u200b</b> &#8203;") == ""
+    assert clean_title("Zero\u200bwidth soft\u00adhyphen") == "Zerowidth softhyphen"
+    # Joiners inside words and emoji sequences are kept.
+    persian = "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645 \U0001f469\u200d\U0001f4bb"
+    assert clean_title(persian) == persian
+
+
+def test_a_line_break_inside_a_sentence_does_not_split_it():
+    assert summary_text("<p>Key findings show the flaw<br>lets a remote attacker execute arbitrary code.</p>") == (
+        "Key findings show the flaw lets a remote attacker execute arbitrary code."
+    )
+    wrapped = (
+        "The vulnerability allows a remote attacker to&lt;br /&gt;\nexecute arbitrary code on affected&lt;br /&gt;\n"
+        "devices without authentication.&lt;br /&gt;\nPatches are available now."
+    )
+    assert summary_text(wrapped) == (
+        "The vulnerability allows a remote attacker to execute arbitrary code on affected devices without "
+        "authentication. Patches are available now."
+    )
+
+
+def test_real_line_and_paragraph_breaks_still_split():
+    # A capitalised next line, a sentence end, or a double break is a real break.
+    assert summary_text("<p>Key Takeaways<br>The intrusion began with a malicious search ad.</p>") == (
+        "The intrusion began with a malicious search ad."
+    )
+    assert summary_text("<p>Officials confirmed the outage on Friday.<br>services resumed on Monday.</p>") == (
+        "Officials confirmed the outage on Friday. services resumed on Monday."
+    )
+    assert html_to_text("<p>Line one<br><br>line two</p>") == "Line one line two"
+    from owlfeed.text import html_to_paragraphs
+    assert html_to_paragraphs("Ransomware hits hospital<br><br>officials said") == ["Ransomware hits hospital", "officials said"]
+    assert html_to_paragraphs("Ransomware hits hospital<br> <br>officials said") == ["Ransomware hits hospital", "officials said"]
+    assert html_to_paragraphs("Ransomware hits hospital<br>Officials said") == ["Ransomware hits hospital", "Officials said"]
+    assert html_to_paragraphs("<br>ransomware hits hospital") == ["ransomware hits hospital"]
+
+
+def test_huge_descriptions_are_summarised_quickly():
+    import time
+
+    for raw in ("Categories: Tags: " * 120_000, "a<br>" * 400_000, "word&lt;br /&gt;\n" * 150_000):
+        assert len(raw) >= 2_000_000
+        start = time.perf_counter()
+        make_summary({"summary": raw, "content": [{"value": raw}]}, "content", "", 320)
+        clean_title(raw)
+        assert time.perf_counter() - start < 2
+    long_article = "<p>The intrusion began with a malicious search ad.</p>" + "<p>More detail follows here.</p>" * 20_000
+    assert summary_text(long_article).startswith("The intrusion began with a malicious search ad. More detail")
+
+
+def test_long_whitespace_around_line_breaks_stays_fast():
+    started = time.perf_counter()
+    summary_text("<p>start" + " " * 60_000 + "<br>" + " " * 60_000 + "end of the line</p>")
+    summary_text("<p>start" + " " * 60_000 + "end</p>")
+    assert time.perf_counter() - started < 1.0

@@ -111,6 +111,18 @@ def test_clean_link_strips_only_tracking_parameters():
     assert clean_link(untouched) == untouched
 
 
+@pytest.mark.parametrize(
+    "query",
+    ["a=1;b=2", "q=caf%E9", "12345", "q=a%20b", "q=a+b&x=", "a=1&&b=2"],
+)
+def test_clean_link_keeps_the_rest_of_the_query_byte_for_byte(query):
+    clean = f"https://x.example/a?{query}"
+    assert clean_link(f"https://x.example/a?{query}&utm_source=rss") == clean
+    assert clean_link(f"https://x.example/a?utm_source=rss&{query}#top") == f"{clean}#top"
+    assert clean_link(f"https://x.example/a?UTM%5FMedium=x&{query}") == clean
+    assert item_id(clean_link(f"{clean}&utm_source=rss")) == item_id(clean_link(clean))
+
+
 def test_item_id_ignores_scheme_case_and_fragment():
     assert item_id("https://Example.com/a") == item_id("http://example.com/a#top")
     assert item_id("https://example.com/a") != item_id("https://example.com/b")
@@ -243,3 +255,60 @@ def test_broken_channel_link_falls_back_to_the_site():
     source = make_source("b", site="https://b.example/")
     (entry,) = parse_feed(feed, source, Settings(), NOW)
     assert entry.url == "https://b.example/news/1"
+
+
+@pytest.mark.parametrize("channel_link", [b"/", b"b.example", b"ftp://b.example/", b""])
+def test_unusable_channel_link_falls_back_to_the_site(channel_link):
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>B</title><link>%s</link>
+    <item><title>Relative</title><link>/news/1</link></item></channel></rss>""" % channel_link
+    (entry,) = parse_feed(feed, make_source("b", site="https://b.example/"), Settings(), NOW)
+    assert entry.url == "https://b.example/news/1"
+
+
+def test_an_opaque_guid_is_never_resolved_into_a_link():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>G</title><link>https://g.example/news/</link>
+    <item><title>Opaque guid</title><guid>abc-123</guid></item>
+    <item><title>Permalink guid</title><guid>https://g.example/news/2</guid></item>
+    <item><title>Real link</title><link>/news/3</link><guid>abc-125</guid></item>
+    </channel></rss>"""
+    found = by_title(parse_feed(feed, make_source("g"), Settings(), NOW))
+    assert "Opaque guid" not in found
+    assert found["Permalink guid"].url == "https://g.example/news/2"
+    assert found["Real link"].url == "https://g.example/news/3"
+
+
+def test_exclude_title_applies_to_a_title_taken_from_the_summary():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>S</title><link>https://s.example/</link>
+    <item><link>https://s.example/1</link><description>Sponsored: Join our webinar on cloud security next week.</description></item>
+    <item><link>https://s.example/2</link><description>An untitled item about a real advisory gets a headline.</description></item>
+    </channel></rss>"""
+    entries = parse_feed(feed, make_source("s", exclude_title=[r"^Sponsored:"]), Settings(), NOW)
+    assert [e.url for e in entries] == ["https://s.example/2"]
+
+
+def test_dates_only_feedparser_reads_keep_their_zone():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>N</title><link>https://n.example/</link>
+    <item><title>Long month CEST</title><link>https://n.example/1</link><pubDate>Mon, 12 October 2026 21:44:00 CEST</pubDate></item>
+    <item><title>Seven digits</title><link>https://n.example/2</link><pubDate>2026-10-12T21:44:00.1234567</pubDate></item>
+    <item><title>Date only</title><link>https://n.example/3</link><pubDate>Mon, 12 Oct 2026</pubDate></item>
+    <item><title>GMT</title><link>https://n.example/4</link><pubDate>Mon, 12 Oct 2026 21:44:00 GMT</pubDate></item>
+    <item><title>Short offset</title><link>https://n.example/5</link><pubDate>2026-10-12T21:44:00+02</pubDate></item>
+    <item><title>AST</title><link>https://n.example/6</link><pubDate>Mon, 12 Oct 2026 21:44:00 AST</pubDate></item>
+    </channel></rss>"""
+    found = by_title(parse_feed(feed, make_source("n", timezone="Europe/Brussels"), Settings(), NOW))
+    assert found["Long month CEST"].published == datetime(2026, 10, 12, 19, 44, tzinfo=timezone.utc)
+    assert found["Seven digits"].published == datetime(2026, 10, 12, 19, 44, tzinfo=timezone.utc)
+    assert found["Date only"].published == datetime(2026, 10, 11, 22, 0, tzinfo=timezone.utc)
+    assert found["GMT"].published == datetime(2026, 10, 12, 21, 44, tzinfo=timezone.utc)
+    # Zones feedparser converts itself are still trusted.
+    assert found["Short offset"].published == datetime(2026, 10, 12, 19, 44, tzinfo=timezone.utc)
+    assert found["AST"].published == datetime(2026, 10, 13, 1, 44, tzinfo=timezone.utc)
+
+
+def test_a_title_of_invisible_characters_falls_back_to_the_summary():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>I</title><link>https://i.example/</link>
+    <item><title>&#8203;&#65279;</title><link>https://i.example/1</link>
+    <description>Researchers found a new loader in signed drivers this week.</description></item>
+    </channel></rss>"""
+    (entry,) = parse_feed(feed, make_source("i"), Settings(), NOW)
+    assert entry.title == "Researchers found a new loader in signed drivers this week."

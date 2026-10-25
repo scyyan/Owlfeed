@@ -8,7 +8,7 @@ import io
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone, tzinfo
-from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import unquote_plus, urljoin, urlsplit, urlunsplit
 
 import feedparser
 
@@ -36,7 +36,12 @@ FALLBACK_DATE_FORMATS = (
     "%B %d, %Y",
 )
 # A date string that names its own offset or zone; the source's configured zone does not apply.
-_HAS_ZONE = re.compile(r"(?:\d\s*(?:Z|[+-]\d{2}:?\d{2})|\b(?:GMT|UTC|UT|[ECMP][SD]T|Z)\b)\s*$", re.IGNORECASE)
+# The names are the ones feedparser converts itself (military letters included).
+_HAS_ZONE = re.compile(
+    r"(?:\d\s*(?:Z|[+-]\d{2}:?\d{2})|:\d{2}(?:\.\d+)?\s*[+-]\d{2}"
+    r"|\b(?:GMT|UTC|UT|[ECMP][SDT]?T|A[DS]?T|MES?T|[AZNMY])\b)\s*$",
+    re.IGNORECASE,
+)
 # Zone abbreviations feedparser does not know (it would silently read them as UTC).
 NAMED_ZONES = {
     name: timezone(timedelta(hours=hours), name)
@@ -80,11 +85,13 @@ def clean_link(url: str) -> str:
     parts = urlsplit(url)
     if not parts.query:
         return url
-    pairs = parse_qsl(parts.query, keep_blank_values=True)
-    kept = [(k, v) for k, v in pairs if not _is_tracking(k)]
-    if len(kept) == len(pairs):
+    # Drop whole "key=value" segments and keep the others byte for byte: re-encoding would change
+    # ";" separators, %-escapes and bare keys ("?12345"), and so the link and its item id.
+    segments = parts.query.split("&")
+    kept = [seg for seg in segments if not _is_tracking(unquote_plus(seg.split("=", 1)[0]))]
+    if len(kept) == len(segments):
         return url
-    return urlunsplit(parts._replace(query=urlencode(kept, doseq=True)))
+    return urlunsplit(parts._replace(query="&".join(kept)))
 
 
 def item_id(url: str) -> str:
@@ -103,7 +110,11 @@ def _alternate_link(entry: dict) -> str | None:
 
 def entry_link(entry: dict, base: str) -> str | None:
     """The original article URL. feedburner:origLink beats redirector links."""
-    for candidate in (entry.get("feedburner_origlink"), entry.get("link"), _alternate_link(entry)):
+    link = entry.get("link")
+    if entry.get("guidislink") and not is_http_url(link):
+        # feedparser copied a <guid> into link; an opaque id ("abc-123") is not a relative URL.
+        link = None
+    for candidate in (entry.get("feedburner_origlink"), link, _alternate_link(entry)):
         if isinstance(candidate, str) and candidate.strip():
             try:
                 url = urljoin(base, candidate.strip())
@@ -147,23 +158,37 @@ def _from_struct(value: object) -> datetime | None:
         return None
 
 
+def _from_wall_clock(value: object, tz: tzinfo) -> datetime | None:
+    """feedparser's reading of a date it took as UTC, reinterpreted as wall-clock time in tz."""
+    try:
+        return datetime(*value[:6], tzinfo=tz).astimezone(timezone.utc)
+    except (OverflowError, TypeError, ValueError):
+        return None
+
+
 def entry_published(entry: dict, now: datetime, tz: tzinfo = timezone.utc) -> datetime | None:
     """Publication time: published, else updated, else created (never a later field over an earlier one)."""
     for key in ("published", "updated", "created"):
         raw = dict.get(entry, key)  # dict.get skips feedparser's deprecated updated->published aliasing
         raw = raw.strip() if isinstance(raw, str) else ""
-        readings = []
+        parsed = dict.get(entry, f"{key}_parsed")
         named = _NAMED_ZONE.search(raw)
         if named:
-            readings.append(parse_loose_date(raw[: named.start()], NAMED_ZONES[named.group(1)]))
+            zone = NAMED_ZONES[named.group(1)]
+            readings = [parse_loose_date(raw[: named.start()], zone), _from_wall_clock(parsed, zone)]
         elif raw and not _HAS_ZONE.search(raw):
-            # feedparser would read a zone-less date as UTC; use the source's own zone instead.
-            readings.append(parse_loose_date(raw, tz))
-        readings.append(_from_struct(dict.get(entry, f"{key}_parsed")))
+            # feedparser reads a zone-less date as UTC; use the source's own zone instead.
+            readings = [parse_loose_date(raw, tz), _from_wall_clock(parsed, tz)]
+        else:
+            readings = [_from_struct(parsed)]
         for moment in readings:
             if moment and _plausible(moment, now):
                 return moment
     return None
+
+
+def _excluded(title: str, source: Source) -> bool:
+    return any(pattern.search(title) for pattern in source.exclude_title)
 
 
 def _entry(raw: dict, base: str, source: Source, settings: Settings, now: datetime) -> Entry | None:
@@ -173,13 +198,15 @@ def _entry(raw: dict, base: str, source: Source, settings: Settings, now: dateti
     # A plain-text title is already decoded; parsing it as HTML would eat "<script>" mentions.
     plain = (raw.get("title_detail") or {}).get("type") == "text/plain"
     title = clean_title(raw.get("title"), plain=plain)
-    if title and any(pattern.search(title) for pattern in source.exclude_title):
+    if title and _excluded(title, source):
         return None
     summary = make_summary(raw, source.summary_from, title, settings.summary_max_chars)
     if not title:
         if not summary:
             return None
         title = truncate(summary, 120)
+        if _excluded(title, source):  # an untitled "Sponsored: …" item
+            return None
     return Entry(item_id(url), url, title, summary, entry_published(raw, now, source.tz))
 
 
@@ -263,11 +290,9 @@ def parse_feed(
             raise FeedParseError(f"not an RSS/Atom feed{detail}")
         return []
 
-    base = parsed.feed.get("link") or source.site
-    try:
-        urlsplit(base)
-    except ValueError:
-        base = source.site  # a broken channel <link> must not discard every entry
+    base = parsed.feed.get("link")
+    if not is_http_url(base):
+        base = source.site  # a broken, relative or non-http channel <link> must not discard every entry
     entries: list[Entry] = []
     seen: set[str] = set()
     for raw in parsed.entries:

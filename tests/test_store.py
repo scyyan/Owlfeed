@@ -139,8 +139,22 @@ def test_all_sources_failing_raises():
 
 def test_previous_validators():
     state = merge(None, CONFIG, {"alpha": ok(etag='"e1"'), "bravo": ok()}, NOW)
-    assert previous_validators(state) == {"alpha": ('"e1"', None), "bravo": (None, None)}
-    assert previous_validators(None) == {}
+    assert previous_validators(state, CONFIG.sources) == {"alpha": ('"e1"', None), "bravo": (None, None)}
+    assert previous_validators(None, CONFIG.sources) == {}
+
+
+def test_validators_are_not_sent_to_a_changed_feed_url():
+    state = merge(None, CONFIG, {"alpha": ok(etag='"e1"'), "bravo": ok(etag='"e2"')}, NOW)
+    assert state["sources"][0]["feed"] == ALPHA.feed
+    moved = make_source("alpha", feed="https://alpha.example.com/new-feed")
+    assert previous_validators(state, (moved, BRAVO)) == {"bravo": ('"e2"', None)}
+    # A failed fetch of the new URL does not carry the old URL's validators forward either.
+    second = merge(state, Config(CONFIG.settings, (moved, BRAVO)), {"alpha": failed(), "bravo": ok()}, NOW)
+    row = second["sources"][0]
+    assert row["feed"] == moved.feed and row["etag"] is None
+    # Rows written before the "feed" field existed are not trusted.
+    legacy = {"sources": [{"id": "alpha", "etag": '"e1"'}]}
+    assert previous_validators(legacy, CONFIG.sources) == {}
 
 
 class FakeResponse:
@@ -293,5 +307,29 @@ def test_a_304_does_not_keep_tombstones_of_items_the_feed_dropped():
 
 
 def test_malformed_previous_source_rows_are_skipped():
-    previous = {"sources": ["junk", {"id": 5}, {"id": "alpha", "etag": "e", "last_modified": 7}]}
-    assert previous_validators(previous) == {"alpha": ("e", None)}
+    previous = {"sources": ["junk", {"id": 5}, {"id": "alpha", "feed": ALPHA.feed, "etag": "e", "last_modified": 7}]}
+    assert previous_validators(previous, CONFIG.sources) == {"alpha": ("e", None)}
+
+
+def test_out_of_range_dates_and_lone_surrogates_in_the_previous_feed_are_harmless(tmp_path):
+    bad_date = "0001-01-01T00:00:00+01:00"
+    good = {"source": "alpha", "url": "https://example.com/s", "published": iso(NOW), "first_seen": iso(NOW)}
+    previous = {
+        "version": 1,
+        "sources": [{"id": "alpha", "feed": ALPHA.feed, "last_ok": bad_date, "etag": "\ud83d"}],
+        "items": [
+            {**good, "id": "old", "title": "Placeholder date", "published": bad_date},
+            {**good, "id": "surrogate", "title": "Rocket \ud83d launch", "summary": "Lone \udc00 half."},
+            {**good, "id": "bad-\ud83d-id", "title": "Bad id"},
+        ],
+        "expired": {"t1": {"source": "alpha", "since": bad_date}, "t\ud83d": {"source": "alpha", "since": iso(NOW)}},
+    }
+    state = merge(previous, CONFIG, {"alpha": failed(), "bravo": ok()}, NOW)
+    assert ids(state) == ["surrogate"]
+    assert state["items"][0]["title"] == "Rocket � launch"
+    assert state["items"][0]["summary"] == "Lone � half."
+    assert state["expired"] == {}
+    row = state["sources"][0]
+    assert row["last_ok"] is None and row["etag"] is None
+    assert previous_validators(previous, CONFIG.sources) == {"alpha": (None, None)}
+    write_state(state, tmp_path / "feed.json")  # must not raise UnicodeEncodeError
