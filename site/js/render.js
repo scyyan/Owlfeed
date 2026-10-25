@@ -134,6 +134,7 @@ export function itemElement(item, ctx) {
   } else {
     target = el('span');
   }
+  target.dir = 'auto'; // an Arabic or Hebrew headline gets its own direction
   appendHighlighted(target, item.title, ctx);
   heading.append(target);
 
@@ -163,13 +164,14 @@ export function itemElement(item, ctx) {
   for (const term of item.watch) {
     const badge = el('span', 'badge badge-watch');
     badge.title = `Matches your watchlist term “${term}”`;
-    badge.append(icon('eye'), el('span', 'sr-only', 'Watchlist: '), term);
+    badge.append(icon('eye'), el('span', 'sr-only', 'Watchlist: '), el('bdi', null, term));
     meta.append(badge);
   }
 
   body.append(heading, meta);
   if (item.summary) {
     const summary = el('p', 'item-summary');
+    summary.dir = 'auto';
     const { start } = matchWindow(item, ctx);
     if (start > 0) {
       // The match that put this row here sits past the two visible lines: start the summary near it.
@@ -228,9 +230,10 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
     const fragment = document.createDocumentFragment();
     for (; index < end; index += 1) {
       const item = entries[index];
-      const key = dayKey(item.publishedMs);
+      const day = Math.min(item.publishedMs, ctx.now); // slightly future items group under today
+      const key = dayKey(day);
       if (key !== lastDay) {
-        const label = dayLabel(item.publishedMs, ctx.now);
+        const label = dayLabel(day, ctx.now);
         fragment.append(section(label.title, label.detail));
         lastDay = key;
       }
@@ -238,7 +241,8 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
     }
     // The finish line, once the last page is on screen.
     if (index >= entries.length && endNote) {
-      fragment.append(endNote);
+      if (typeof endNote === 'function') endNote = endNote();
+      if (endNote) fragment.append(endNote);
       endNote = null;
     }
     container.append(fragment);
@@ -251,9 +255,10 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
      * options.pinned: items shown first under their own header (watchlist hits in a briefing),
      * with pinnedDetail beside the header and pinnedFooter (a Show all toggle) after them;
      * options.lead: a node above everything (the briefing summary); options.end: a node after the
-     * last item (the caught-up marker).
+     * last item (the caught-up marker), or a function that builds it when it is appended; options.minCount: draw at least this many rows at once, so
+     * redrawing a list the reader had scrolled down keeps their place and focus.
      */
-    render(list, context, { pinned = [], pinnedDetail = '', pinnedFooter = null, lead = null, end = null } = {}) {
+    render(list, context, { pinned = [], pinnedDetail = '', pinnedFooter = null, lead = null, end = null, minCount = 0 } = {}) {
       entries = list;
       ctx = context;
       index = 0;
@@ -268,10 +273,15 @@ export function createFeedRenderer(container, sentinel, pageSize = 80) {
         if (pinnedFooter) hits.append(pinnedFooter);
         container.append(hits);
       }
-      renderMore();
+      do renderMore();
+      while (ctx && index < Math.min(minCount, entries.length));
     },
     get size() {
       return entries.length;
+    },
+    /** How many rows of the list are on the page. */
+    get rendered() {
+      return index;
     },
   };
 }
@@ -356,9 +366,10 @@ export function healthTitle(source, now) {
 
 /**
  * Sources grouped under collapsible headings. openGroups holds the groups the reader opened; a
- * group with a failing source or a partial selection opens by itself.
+ * group with a failing source or a partial selection opens by itself, unless the reader closed
+ * it (closedGroups).
  */
-export function renderSources(container, sources, { hiddenSources, hiddenCategories, counts, now, openGroups, staleSince = null }) {
+export function renderSources(container, sources, { hiddenSources, hiddenCategories, counts, now, openGroups, closedGroups = new Set(), staleSince = null }) {
   const groups = new Map();
   for (const source of sources) {
     const key = `${source.category} › ${source.group}`;
@@ -377,8 +388,10 @@ export function renderSources(container, sources, { hiddenSources, hiddenCategor
     // Open what needs a look: a failing source, or a partial selection. A group that is all on or
     // all off says everything in its tally ("10/10", "0/7"), so it stays folded.
     const partial = shown > 0 && shown < group.sources.length;
-    wrapper.open = openGroups.has(group.title) || failing > 0 || partial;
+    // One the reader closed stays closed, even while it has something to show.
+    wrapper.open = openGroups.has(group.title) || (!closedGroups.has(group.title) && (failing > 0 || partial));
     const summary = el('summary', 'group-heading');
+    summary.dataset.groupSummary = group.title; // lets focus come back here after a redraw
     summary.append(el('span', 'group-title', group.title));
     const tally = el('span', `group-tally${failing ? ' is-error' : ''}`, `${shown}/${group.sources.length}`);
     tally.title = `${shown} of ${group.sources.length} sources shown${failing ? `, ${failing} not answering` : ''}`;

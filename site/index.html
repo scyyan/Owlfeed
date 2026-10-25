@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Owlfeed</title>
   <meta name="description" content="OSINT news dashboard: the latest cyber threat intelligence and geopolitical reporting from trusted sources, newest first.">
@@ -17,6 +17,7 @@
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
+  <p class="framed-note" hidden>Owlfeed can’t be used inside another page. <a href="./" target="_blank" rel="noopener noreferrer">Open Owlfeed in its own tab</a>.</p>
   <a class="skip-link" id="skip-link" href="#feed">Skip to timeline</a>
   <a class="skip-link" id="skip-search" href="#search">Skip to search</a>
   <div class="app">

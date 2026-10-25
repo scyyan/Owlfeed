@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 from collections import Counter
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from typing import Callable
 
 import requests
 
-from .config import FUTURE_TOLERANCE, Config, is_http_url
+from .config import FUTURE_TOLERANCE, Config, Source, is_http_url
 from .fetch import USER_AGENT, FetchResult
 from .parse import Entry
 
@@ -26,6 +27,8 @@ TOMBSTONE_DAYS = 30
 MAX_TOMBSTONES = 5000
 
 log = logging.getLogger(__name__)
+# A lone UTF-16 surrogate (e.g. "\ud83d" in the JSON) loads fine but cannot be written back as UTF-8.
+_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 class PreviousStateError(RuntimeError):
@@ -56,7 +59,20 @@ def parse_iso(value: object) -> datetime | None:
         return None
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
-    return moment
+    try:
+        return moment.astimezone(timezone.utc)
+    except OverflowError:
+        return None  # e.g. "0001-01-01T00:00:00+01:00" falls before year 1 in UTC
+
+
+def _text(value: object) -> str | None:
+    """A restored string, with lone surrogates replaced so it can be written out again."""
+    return _SURROGATE.sub("\ufffd", value) if isinstance(value, str) else None
+
+
+def _clean_key(value: object) -> str | None:
+    """A restored id or URL; None if it is not a string or holds a lone surrogate."""
+    return value if isinstance(value, str) and not _SURROGATE.search(value) else None
 
 
 def validate_previous(data: object) -> dict | None:
@@ -105,19 +121,20 @@ def _clean_previous_item(item: object, now: datetime) -> dict | None:
     if not isinstance(item, dict):
         return None
     published, first_seen = parse_iso(item.get("published")), parse_iso(item.get("first_seen"))
-    fields = (item.get("id"), item.get("source"), item.get("title"))
-    if not all(isinstance(f, str) and f for f in fields) or not is_http_url(item.get("url")):
+    fields = (_clean_key(item.get("id")), _clean_key(item.get("source")), _text(item.get("title")))
+    url = _clean_key(item.get("url"))
+    if not all(fields) or not is_http_url(url):
         return None
     if published is None or first_seen is None:
         return None
     if max(published, first_seen) > now + FUTURE_TOLERANCE:
         return None
     return {
-        "id": item["id"],
-        "source": item["source"],
-        "title": item["title"],
-        "url": item["url"],
-        "summary": item.get("summary") if isinstance(item.get("summary"), str) else "",
+        "id": fields[0],
+        "source": fields[1],
+        "title": fields[2],
+        "url": url,
+        "summary": _text(item.get("summary")) or "",
         "published": iso(published),
         "first_seen": iso(first_seen),
         "date_estimated": bool(item.get("date_estimated")),
@@ -133,15 +150,26 @@ def _previous_source_rows(previous: dict | None) -> dict[str, dict]:
     }
 
 
-def previous_validators(previous: dict | None) -> dict[str, tuple[str | None, str | None]]:
+def _same_feed(row: dict, source: Source) -> bool:
+    """Whether a previous row was fetched from the source's current feed URL.
+
+    Validators belong to one URL: sent to a new feed's server they could get a 304 for content we never
+    read. Rows from before the "feed" field existed count as different (one full download, no harm).
+    """
+    return row.get("feed") == source.feed
+
+
+def previous_validators(
+    previous: dict | None, sources: tuple[Source, ...]
+) -> dict[str, tuple[str | None, str | None]]:
     """ETag/Last-Modified per source from the previous run, for conditional GETs."""
+    rows = _previous_source_rows(previous)
     validators: dict[str, tuple[str | None, str | None]] = {}
-    for source_id, row in _previous_source_rows(previous).items():
-        etag, modified = row.get("etag"), row.get("last_modified")
-        validators[source_id] = (
-            etag if isinstance(etag, str) else None,
-            modified if isinstance(modified, str) else None,
-        )
+    for source in sources:
+        row = rows.get(source.id)
+        if row is None or not _same_feed(row, source):
+            continue
+        validators[source.id] = (_clean_key(row.get("etag")), _clean_key(row.get("last_modified")))
     return validators
 
 
@@ -156,7 +184,7 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
     raw_expired = (previous or {}).get("expired")
     expired_before: dict[str, dict] = {}
     for item_id, mark in (raw_expired.items() if isinstance(raw_expired, dict) else []):
-        if not (isinstance(item_id, str) and isinstance(mark, dict)):
+        if not (_clean_key(item_id) and isinstance(mark, dict)):
             continue
         source_id, since = mark.get("source"), parse_iso(mark.get("since"))
         if isinstance(source_id, str) and source_id in enabled_ids and since and since <= now + FUTURE_TOLERANCE:
@@ -245,18 +273,21 @@ def merge(previous: dict | None, config: Config, outcomes: dict[str, SourceOutco
         ok = outcome is not None and outcome.error is None
         if ok:
             etag, modified = outcome.result.etag, outcome.result.last_modified
+        elif _same_feed(prior, source):
+            etag, modified = _clean_key(prior.get("etag")), _clean_key(prior.get("last_modified"))
         else:
-            etag, modified = prior.get("etag"), prior.get("last_modified")
+            etag, modified = None, None
         rows.append(
             {
                 "id": source.id,
                 "name": source.name,
                 "site": source.site,
+                "feed": source.feed,  # the URL the etag/last_modified belong to
                 "category": source.category,
                 "group": source.group,
                 "status": "ok" if ok else "error",
                 "error": None if ok else (outcome.error if outcome else "not fetched"),
-                "last_ok": now_iso if ok else prior.get("last_ok"),
+                "last_ok": now_iso if ok else last_ok_before.get(source.id),
                 "etag": etag,
                 "last_modified": modified,
                 "count": counts[source.id],

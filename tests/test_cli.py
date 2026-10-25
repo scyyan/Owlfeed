@@ -156,3 +156,46 @@ def test_summary_cells_neutralize_feed_text():
     cell = cli._cell("[click](https://evil.example) | <b>x</b>")
     assert "[click](" not in cell and "<b>" not in cell
     assert r"\[click\]\(https://evil.example\) \|" in cell
+
+
+def _fence(lines):
+    start = next(i for i, l in enumerate(lines) if l.startswith("::stop-commands::"))
+    token = lines[start].split("::")[2]
+    return start, lines.index(f"::{token}::")
+
+
+def _noisy_fetch(sources, validators=None):
+    print("::add-mask::text-from-a-feed")  # stands in for feed text logged while fetching or parsing
+    return {s.id: FetchResult(status=200, content=feed_bytes(FIXTURES[s.feed])) for s in sources}
+
+
+@pytest.mark.parametrize("command", [["check"], ["build", "--out", "OUT"]])
+def test_fetching_and_parsing_output_is_fenced(command, sources_file, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(cli, "fetch_all", _noisy_fetch)
+    command = [str(tmp_path / "feed.json") if c == "OUT" else c for c in command]
+    assert run("--sources", sources_file, "--now", "2026-10-15T14:00:00Z", *command) == 0
+    lines = capsys.readouterr().out.splitlines()
+    start, end = _fence(lines)
+    assert start < lines.index("::add-mask::text-from-a-feed") < end
+
+
+@pytest.mark.parametrize("command", [["check"], ["build", "--out", "OUT"]])
+def test_the_fence_is_closed_when_a_run_crashes(command, sources_file, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+
+    def crash(sources, validators=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "fetch_all", crash)
+    command = [str(tmp_path / "feed.json") if c == "OUT" else c for c in command]
+    with pytest.raises(RuntimeError):
+        run("--sources", sources_file, *command)
+    start, end = _fence(capsys.readouterr().out.splitlines())
+    assert start < end
+
+
+def test_no_fence_outside_actions(sources_file, fake_network, monkeypatch, capsys):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    run("--sources", sources_file, "check")
+    assert "::stop-commands::" not in capsys.readouterr().out

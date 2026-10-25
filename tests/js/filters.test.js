@@ -34,6 +34,13 @@ test('fold strips accents and case', () => {
   assert.equal(fold('Café ZELENSKYY'), 'cafe zelenskyy');
 });
 
+test('curly quotes fold to straight ones, keeping offsets', () => {
+  assert.equal(fold('Yemen’s “ports”'), 'yemen\'s "ports"');
+  assert.equal(matchesQuery(fold('Yemen’s ports'), parseQuery("Yemen's")), true);
+  assert.equal(matchesQuery(fold("Yemen's ports"), parseQuery('Yemen’s')), true);
+  assert.deepEqual(queryRanges('The People’s Army', parseQuery("people's")), [[4, 12]]);
+});
+
 test('parseQuery keeps quoted phrases', () => {
   assert.deepEqual(parseQuery('  "Volt Typhoon"  cisa '), ['volt typhoon', 'cisa']);
   assert.deepEqual(parseQuery(''), []);
@@ -130,4 +137,20 @@ test('prefixSuggestion turns bare words into prefixes', () => {
 test('a quote still being typed does not empty the search', () => {
   assert.deepEqual(parseQuery('"volt ty'), ['volt', 'ty']);
   assert.deepEqual(parseQuery('"volt typhoon"'), ['volt typhoon']);
+});
+
+test('punctuation around words is ignored, and punctuation alone is no token', () => {
+  assert.deepEqual(parseQuery('Russia - Ukraine'), ['russia', 'ukraine']);
+  assert.deepEqual(parseQuery('Russia & Ukraine'), ['russia', 'ukraine']);
+  assert.deepEqual(parseQuery('lockbit, ransomware.'), ['lockbit', 'ransomware']);
+  assert.deepEqual(parseQuery('(Kiev) ransom*,'), ['kiev', 'ransom*']);
+  assert.deepEqual(parseQuery('C++ u.s.'), ['c++', 'u.s']);
+  assert.equal(matchesQuery(fold('Talks between the U.S. and Iran'), parseQuery('u.s.')), true);
+});
+
+test('queryRanges hands out copies, so callers cannot spoil later answers', () => {
+  const tokens = parseQuery('cafe');
+  const first = queryRanges('Café attack', tokens);
+  first[0][1] = 99;
+  assert.deepEqual(queryRanges('Café attack', tokens), [[0, 4]]);
 });

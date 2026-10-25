@@ -1,5 +1,8 @@
+import gzip
+import http.server
 import threading
 
+import pytest
 import requests
 
 from owlfeed import fetch as fetch_module
@@ -27,6 +30,10 @@ class FakeResponse:
         self.raw = FakeRaw(body, on_read)
         self.url = url
         self.history = list(history)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
 
     def __enter__(self):
         return self
@@ -69,17 +76,81 @@ def test_conditional_get_and_not_modified():
     assert headers["If-None-Match"] == '"v1"' and headers["If-Modified-Since"] == "Wed"
 
 
-def test_redirects_that_stay_on_https_are_followed():
-    get = Recorder(FakeResponse(200, b"<rss/>", url="https://b.example/feed", history=[FakeResponse(301)]))
+def redirect(location, status=301):
+    def never_read():
+        raise AssertionError("a redirect body must not be read")
+
+    return FakeResponse(status, b"\x1f\x8b bomb", {"Location": location}, on_read=never_read)
+
+
+def test_redirects_that_stay_on_https_are_followed_without_reading_their_bodies():
+    hop = redirect("/moved")
+    get = Recorder(hop, FakeResponse(200, b"<rss/>"))
     result = fetch("https://a.example/feed", get=get, sleep=no_sleep)
     assert result.error is None and result.content == b"<rss/>"
+    assert [url for url, _ in get.calls] == ["https://a.example/feed", "https://a.example/moved"]
+    assert all(kwargs["allow_redirects"] is False for _, kwargs in get.calls)
+    assert hop.closed
 
 
 def test_redirects_to_plain_http_are_refused():
-    get = Recorder(FakeResponse(200, b"<rss>evil</rss>", url="http://a.example/feed", history=[FakeResponse(301)]))
+    get = Recorder(redirect("http://a.example/feed"))
     result = fetch("https://a.example/feed", get=get, sleep=no_sleep)
     assert result.error == "redirected to a non-https URL" and result.content is None
     assert len(get.calls) == 1
+
+
+def test_a_plain_http_hop_in_the_middle_is_refused():
+    get = Recorder(redirect("http://hop.example/x"), redirect("https://evil.example/feed"), FakeResponse(200))
+    result = fetch("https://a.example/feed", get=get, sleep=no_sleep)
+    assert result.error == "redirected to a non-https URL"
+    assert len(get.calls) == 1
+
+
+@pytest.fixture
+def redirect_server(monkeypatch):
+    """A local server whose /r answers 302 with a gzip body that inflates to 64 MB (a small bomb)."""
+    body = gzip.compress(b"\0" * (64 << 20))
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", "/feed")
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    yield f"http://127.0.0.1:{server.server_address[1]}/r"
+    server.shutdown()
+    server.server_close()
+
+
+def test_the_real_session_leaves_redirect_bodies_unread(redirect_server):
+    # Plain requests reads (and inflates) the redirect body even with allow_redirects=False.
+    with requests.Session() as session:
+        eager = session.get(redirect_server, stream=True, allow_redirects=False)
+        assert eager.raw.tell() > 0
+        eager.close()
+    response = fetch_module._get(redirect_server, stream=True, allow_redirects=False)
+    try:
+        assert response.status_code == 302 and response.raw.tell() == 0
+    finally:
+        response.close()
+
+
+def test_redirect_loops_stop():
+    get = Recorder(*[redirect(f"/r{i}", 302) for i in range(fetch_module.MAX_REDIRECTS + 1)])
+    result = fetch("https://a.example/feed", get=get, sleep=no_sleep)
+    assert result.error == "too many redirects"
+    assert len(get.calls) == fetch_module.MAX_REDIRECTS + 1
 
 
 def test_exhausted_retries_keep_the_last_status():

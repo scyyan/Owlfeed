@@ -6,8 +6,9 @@ import re
 from html import unescape
 from html.parser import HTMLParser
 
+# <br> is not here: it may only wrap a line mid-sentence (see _join_soft_breaks).
 BLOCK_TAGS = frozenset(
-    "address article aside blockquote br dd div dl dt figure footer h1 h2 h3 h4 h5 h6 "
+    "address article aside blockquote dd div dl dt figure footer h1 h2 h3 h4 h5 h6 "
     "header hr li main nav ol p pre section table tbody td th tr ul".split()
 )
 SKIP_TAGS = frozenset(
@@ -20,6 +21,14 @@ MIN_USEFUL_CHARS = 40
 HEADING_MAX_CHARS = 40
 
 _WHITESPACE = re.compile(r"\s+")
+# Zero-width space, word joiner, BOM and soft hyphen carry no text, so they are removed everywhere.
+_INVISIBLE = re.compile("[\u200b\u2060\ufeff\u00ad]")
+# These matter inside words (Persian, Indic scripts, emoji sequences) but alone are still blank.
+_BLANK_ONLY = "\u200c\u200d\u3164\u115f\u1160\uffa0"
+# Feed HTML and text past these sizes cannot reach a summary; capping keeps the cleaning fast.
+MAX_HTML_CHARS = 64_000
+MAX_TEXT_CHARS = 16_000
+_BREAK_MARK = "\x00"  # where a <br> stood while a paragraph is collected
 _LEFTOVER_ENTITY = re.compile(r"&(?:#\d{1,7}|#x[0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});")
 # Real markup that survived a first decoding pass, i.e. double-escaped HTML ("&lt;p&gt;…&lt;/p&gt;").
 # Only common content tags count, and a paragraph is parsed again only when it opens with such a tag
@@ -41,6 +50,8 @@ _BREAK_RUN = re.compile(r"<br\s*/?>(?:\s*<br\s*/?>)*", re.IGNORECASE)
 _GLUED_BEFORE_BREAK = re.compile(r"(?:[\w.!?:;…%)\]”’]|[\w.!?…%)\]][\"'])$")
 # Once one break is plainly markup, every break in that text is (nl2br output: "Monday. <br />\nCitizens").
 _ANY_BREAKS = re.compile(r"(?:<br\s*/?>\s*)+", re.IGNORECASE)
+_ANY_BREAKS_SPLIT = re.compile(r"((?:<br\s*/?>\s*)+)", re.IGNORECASE)
+_BREAK_TAG = re.compile(r"<br", re.IGNORECASE)
 _STRAY_COMMENT = re.compile(
     r"(?:^|(?<=[.!?\"'”’)>]))\s*<!--\s*(?:more|/?wp:)[^<>]*-->\s*(?=$|[A-Z<])", re.IGNORECASE
 )
@@ -64,6 +75,7 @@ _ABBREVIATION = re.compile(
 # "3 a.m. local time", "Smith et al. found": a short, dotted or listed lowercase word before the period.
 _LOWERCASE_ABBREVIATION = re.compile(r"(?:\b[a-z]{1,3}|\.[a-z]|\b(?:incl|excl|approx|govt|dept|esp|resp|misc))\.$")
 _TERMINAL = re.compile(r"[.!?…:;\"'”’)\]]$")
+_WORD = re.compile(r"\w")
 
 # Whole (short) paragraphs that are never part of an article's summary.
 JUNK_MAX_CHARS = 300
@@ -155,30 +167,34 @@ class _ParagraphExtractor(HTMLParser):
             self.RCDATA_CONTENT_ELEMENTS = ()
 
     def _flush(self) -> None:
-        text = collapse_whitespace("".join(self._buffer))
-        if text:
-            self.paragraphs.append(text)
+        self.paragraphs.extend(_join_soft_breaks(*_split_at_breaks("".join(self._buffer))))
         self._buffer = []
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
         if tag in self._skip_tags:
             self._skip_depth += 1
+        elif tag == "br":
+            self._buffer.append(_BREAK_MARK)
         elif tag in BLOCK_TAGS:
             self._flush()
 
     def handle_startendtag(self, tag: str, attrs: list) -> None:
-        if tag in BLOCK_TAGS:
+        if tag == "br":
+            self._buffer.append(_BREAK_MARK)
+        elif tag in BLOCK_TAGS:
             self._flush()
 
     def handle_endtag(self, tag: str) -> None:
         if tag in self._skip_tags:
             self._skip_depth = max(0, self._skip_depth - 1)
+        elif tag == "br":
+            self._buffer.append(_BREAK_MARK)  # browsers treat a stray </br> as <br>
         elif tag in BLOCK_TAGS:
             self._flush()
 
     def handle_data(self, data: str) -> None:
         if not self._skip_depth:
-            self._buffer.append(data)
+            self._buffer.append(data.replace(_BREAK_MARK, ""))
 
     def close(self) -> None:
         super().close()
@@ -186,7 +202,62 @@ class _ParagraphExtractor(HTMLParser):
 
 
 def collapse_whitespace(text: str) -> str:
-    return _WHITESPACE.sub(" ", text).strip()  # \s also matches non-breaking spaces
+    text = _WHITESPACE.sub(" ", _INVISIBLE.sub("", text)).strip()  # \s also matches non-breaking spaces
+    return text if text.strip(_BLANK_ONLY + " ") else ""
+
+
+def _split_at_breaks(text: str) -> tuple[list[str], list[bool]]:
+    """Lines between <br> marks, and for each gap whether it was a single break.
+
+    Breaks with only whitespace between them count as one run ("<br> <br>" is a double break).
+    A plain split, not a regex: a pattern like \\s*X(\\s*X)* backtracks quadratically on long
+    whitespace.
+    """
+    parts = text.split(_BREAK_MARK)
+    lines, single = [parts[0]], []
+    marks = 0
+    for part in parts[1:]:
+        marks += 1
+        if part.strip():
+            single.append(marks == 1)
+            lines.append(part)
+            marks = 0
+    if marks:
+        single.append(marks == 1)
+        lines.append("")
+    return lines, single
+
+
+def _join_soft_breaks(lines: list[str], single: list[bool]) -> list[str]:
+    """Paragraphs from text split at line breaks; single[i] tells if break i (after lines[i]) was one <br>.
+
+    A lone break between a line with no closing punctuation and one that starts in lowercase only
+    wraps the sentence ("…lets a remote attacker<br>execute code"), so those lines are joined. A double
+    break, or any other break, still separates paragraphs.
+    """
+    paragraphs: list[list[str]] = []  # each one as its lines, joined at the end
+    soft = False
+    for i, line in enumerate(lines):
+        line = collapse_whitespace(line)
+        if line:
+            if soft and paragraphs and not _TERMINAL.search(paragraphs[-1][-1]) and line[:1].islower():
+                paragraphs[-1].append(line)
+            else:
+                paragraphs.append([line])
+        if i < len(single):
+            # An empty line in between (e.g. "<br> <br>") is a paragraph break too.
+            soft = single[i] and (bool(line) or soft)
+    return [" ".join(p) for p in paragraphs]
+
+
+def _cap_html(value: str) -> str:
+    """The start of very long feed HTML, cut just before a tag (or at a space) so nothing is half-read."""
+    if len(value) <= MAX_HTML_CHARS:
+        return value
+    cut = value.rfind("<", 0, MAX_HTML_CHARS)
+    if cut < MAX_HTML_CHARS // 2:
+        cut = value.rfind(" ", 0, MAX_HTML_CHARS)
+    return value[: cut if cut >= MAX_HTML_CHARS // 2 else MAX_HTML_CHARS]
 
 
 def _parse_paragraphs(value: str, skip_tags: frozenset[str] = SKIP_TAGS, raw_text: bool = True) -> list[str]:
@@ -201,8 +272,9 @@ def html_to_paragraphs(value: object) -> list[str]:
     """Split feed HTML into plain-text paragraphs (tags stripped, entities decoded)."""
     if not isinstance(value, str) or not value.strip():
         return []
+    value = _cap_html(value)
     if "<" not in value and "&" not in value:
-        return [collapse_whitespace(value)]
+        return [p for p in [collapse_whitespace(value)] if p]
     paragraphs = []
     for paragraph in _parse_paragraphs(value):
         # Double-escaped HTML ("&lt;p&gt;") only becomes markup after the first pass. Captions, scripts,
@@ -212,8 +284,12 @@ def html_to_paragraphs(value: object) -> list[str]:
             paragraphs.extend(_parse_paragraphs(_CLOSED_SKIP.sub(" ", paragraph), frozenset(), raw_text=False))
         elif "<" in paragraph:
             cleaned = _STRAY_COMMENT.sub(" ", _drop_images(paragraph, _is_tracking_pixel))
-            parts = _ANY_BREAKS.split(cleaned) if _has_stray_break(cleaned) else [cleaned]
-            paragraphs.extend(p for p in map(collapse_whitespace, parts) if p)
+            if _has_stray_break(cleaned):
+                parts = _ANY_BREAKS_SPLIT.split(cleaned)
+                single = [len(_BREAK_TAG.findall(run)) == 1 for run in parts[1::2]]
+                paragraphs.extend(_join_soft_breaks(parts[::2], single))
+            else:
+                paragraphs.extend(p for p in [collapse_whitespace(cleaned)] if p)
         else:
             paragraphs.append(paragraph)
     return [p for p in paragraphs if p]
@@ -246,7 +322,13 @@ def summary_text(value: object, title: str = "") -> str:
     kept = [p for p in html_to_paragraphs(value) if not (len(p) <= JUNK_MAX_CHARS and _JUNK_PARAGRAPH.match(p))]
     body = [p for p in kept if not _is_heading(p)] or kept
     sentences = [p if i == len(body) - 1 or _TERMINAL.search(p) else p + "." for i, p in enumerate(body)]
-    return strip_boilerplate(" ".join(sentences), title)
+    text = " ".join(sentences)
+    if len(text) > MAX_TEXT_CHARS:
+        # Only the start can become the summary; the inline boilerplate patterns are slow on huge text.
+        cut = text.rfind(" ", 0, MAX_TEXT_CHARS)
+        text = text[: cut if cut > 0 else MAX_TEXT_CHARS]
+    text = strip_boilerplate(text, title)
+    return text if _WORD.search(text) else ""  # e.g. an empty WordPress excerpt, " […]"
 
 
 def strip_boilerplate(text: str, title: str = "") -> str:

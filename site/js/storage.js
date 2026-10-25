@@ -6,9 +6,11 @@
 // writing (read-modify-write) instead of writing back a possibly stale in-memory copy, and
 // other tabs' changes arrive through the browser's "storage" event (see listen()).
 
-import { normalizeTerm } from './watchlist.js';
+import { cleanTerms, MAX_TERMS, normalizeTerm } from './watchlist.js';
 
 const PREFIX = 'owlfeed:v1:';
+// A restore adds at most this many saved items and read marks (bounds a huge or hostile file).
+export const MAX_IMPORT_ENTRIES = 20_000;
 const READ_TTL_DAYS = 30;
 const DAY = 86_400_000;
 
@@ -25,6 +27,11 @@ function defaultBackend() {
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Item ids become object keys; never use one that names a built-in property. */
+function isSafeKey(id) {
+  return typeof id === 'string' && id !== '__proto__' && !(id in Object.prototype);
 }
 
 function stringList(value) {
@@ -79,24 +86,27 @@ export function createStorage(backend = defaultBackend()) {
     return memory.get(key);
   }
 
+  /** Store a value; returns false when it only lives in memory (storage full or blocked). */
   function save(key, value) {
     memory.set(key, value);
     if (!backend) {
       memoryOnly.add(key);
-      return;
+      return false;
     }
     try {
       backend.setItem(PREFIX + key, JSON.stringify(value));
       memoryOnly.delete(key);
+      return true;
     } catch {
       memoryOnly.add(key); // storage full or blocked: keep working from memory for this visit
+      return false;
     }
   }
 
   /** Apply a change to the freshest stored copy, so another tab's writes are not lost. */
   function update(key, fallback, change) {
     const current = readBackend(key, fallback);
-    save(key, change(current));
+    return save(key, change(current));
   }
 
   const asObject = (value) => (isPlainObject(value) ? value : {});
@@ -134,16 +144,28 @@ export function createStorage(backend = defaultBackend()) {
         return next;
       });
     },
-    /** Forget read marks older than the retention window to keep storage small. */
+    /**
+     * Forget read marks older than the retention window to keep storage small. Saved items keep
+     * theirs: they stay on the Saved list long after the feed drops them.
+     */
     pruneRead(now = Date.now()) {
       const cutoff = now - READ_TTL_DAYS * DAY;
+      const saved = asObject(readBackend('saved', {}));
       update('read', {}, (current) =>
-        Object.fromEntries(Object.entries(asObject(current)).filter(([, at]) => typeof at === 'number' && at >= cutoff)),
+        Object.fromEntries(
+          Object.entries(asObject(current)).filter(
+            ([id, at]) => typeof at === 'number' && (at >= cutoff || Object.hasOwn(saved, id)),
+          ),
+        ),
       );
     },
 
-    isSaved: (id) => Object.hasOwn(savedMap(), id),
-    savedItems: () => Object.values(savedMap()),
+    isSaved(id) {
+      const saved = savedMap();
+      return Object.hasOwn(saved, id) && cleanSnapshot(saved[id]) !== null;
+    },
+    // Validated on read too: a damaged entry (devtools, another page on this origin) must not break the app.
+    savedItems: () => Object.values(savedMap()).map(cleanSnapshot).filter(Boolean),
     setSaved(snapshot, saved = true) {
       const clean = saved ? cleanSnapshot(snapshot) : null;
       if (saved && !clean) return false;
@@ -156,11 +178,12 @@ export function createStorage(backend = defaultBackend()) {
       return true;
     },
 
-    watchlist: () => stringList(load('watchlist', [])),
+    // Cleaned on read, so older stored lists (untidy, duplicated or oversized) still work.
+    watchlist: () => cleanTerms(stringList(load('watchlist', []))),
     setWatchlist: (terms) => save('watchlist', stringList(terms)),
     /** Change the watchlist against the freshest stored copy; change(terms) returns the new list. */
     updateWatchlist(change) {
-      update('watchlist', [], (current) => stringList(change(stringList(current))));
+      update('watchlist', [], (current) => cleanTerms(stringList(change(cleanTerms(stringList(current))))));
       return this.watchlist();
     },
 
@@ -213,55 +236,63 @@ export function createStorage(backend = defaultBackend()) {
     },
 
     /** Merge a backup into this browser. Returns what was added, or throws on a foreign file. */
-    importData(data) {
+    importData(data, now = new Date()) {
       if (!isPlainObject(data) || data.app !== 'owlfeed') {
         throw new Error('This file is not an Owlfeed backup.');
       }
       let termsAdded = 0;
-      this.updateWatchlist((terms) => {
+      let persisted = true;
+      persisted = update('watchlist', [], (current) => {
+        const terms = cleanTerms(stringList(current));
         // Imported terms get the same cleanup as typed ones, so each chip can match its hits.
         const lower = new Set(terms.map((t) => t.toLowerCase()));
         const fresh = [];
         for (const term of stringList(data.watchlist).map(normalizeTerm)) {
+          if (terms.length + fresh.length >= MAX_TERMS) break;
           if (!term || term === '*' || lower.has(term.toLowerCase())) continue;
           lower.add(term.toLowerCase());
           fresh.push(term);
         }
         termsAdded = fresh.length;
         return [...terms, ...fresh];
-      });
+      }) && persisted;
 
       let savedAdded = 0;
-      update('saved', {}, (current) => {
+      persisted = update('saved', {}, (current) => {
         const saved = { ...asObject(current) };
-        for (const value of Object.values(asObject(data.saved))) {
+        for (const value of Object.values(asObject(data.saved)).slice(0, MAX_IMPORT_ENTRIES)) {
           const clean = cleanSnapshot(value);
-          if (clean && !saved[clean.id]) {
+          if (clean && isSafeKey(clean.id) && !Object.hasOwn(saved, clean.id)) {
             saved[clean.id] = clean;
             savedAdded += 1;
           }
         }
         return saved;
-      });
+      }) && persisted;
 
-      update('read', {}, (current) => {
+      persisted = update('read', {}, (current) => {
         const read = { ...asObject(current) };
-        for (const [id, at] of Object.entries(asObject(data.read))) {
-          if (typeof at === 'number') read[id] = Math.max(read[id] ?? 0, at);
+        const latest = now.getTime();
+        for (const [id, at] of Object.entries(asObject(data.read)).slice(0, MAX_IMPORT_ENTRIES)) {
+          if (!isSafeKey(id) || !Number.isFinite(at)) continue;
+          // A mark from the future would never be pruned.
+          const mark = Math.min(at, latest);
+          read[id] = Object.hasOwn(read, id) && Number.isFinite(read[id]) ? Math.max(read[id], mark) : mark;
         }
         return read;
-      });
+      }) && persisted;
 
       if (isPlainObject(data.prefs)) {
-        save('prefs', {
+        persisted = save('prefs', {
           view: typeof data.prefs.view === 'string' ? data.prefs.view : DEFAULT_PREFS.view,
           hiddenCategories: stringList(data.prefs.hiddenCategories),
           hiddenSources: stringList(data.prefs.hiddenSources),
           density: DENSITIES.includes(data.prefs.density) ? data.prefs.density : DEFAULT_PREFS.density,
           shortcuts: data.prefs.shortcuts !== false,
-        });
+        }) && persisted;
       }
-      return { terms: termsAdded, saved: savedAdded };
+      // persisted: false means some of it is only kept for this visit (storage full or blocked).
+      return { terms: termsAdded, saved: savedAdded, persisted };
     },
   };
 }

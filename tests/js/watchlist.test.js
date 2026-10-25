@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { addTerm, buildMatcher, normalizeTerm, removeTerm } from '../../site/js/watchlist.js';
+import { addTerm, buildMatcher, cleanTerms, MAX_TERMS, normalizeTerm, removeTerm } from '../../site/js/watchlist.js';
 
 test('normalizeTerm trims and collapses whitespace', () => {
   assert.equal(normalizeTerm('  Lazarus   Group '), 'Lazarus Group');
@@ -70,4 +70,32 @@ test('normalizeTerm tidies stars and a lone star is ignored', () => {
 
 test('addTerm rejects a lone star', () => {
   assert.deepEqual(addTerm([], '***'), { terms: [], added: false });
+});
+
+test('terms ignore accents, capitals and curly quotes, like the search', () => {
+  assert.deepEqual(buildMatcher(['Erdogan']).match('Erdoğan meets Putin'), ['Erdogan']);
+  assert.deepEqual(buildMatcher(['Sao Paulo']).match('Floods in São Paulo'), ['Sao Paulo']);
+  assert.deepEqual(buildMatcher(['istanbul']).match('İSTANBUL'), ['istanbul']);
+  assert.deepEqual(buildMatcher(['café']).match('café attack'), ['café']); // decomposed accent in the feed
+  assert.deepEqual(buildMatcher(["People's Liberation Army"]).match('The People’s Liberation Army drills'), ["People's Liberation Army"]);
+  assert.deepEqual(buildMatcher(['Erdogan']).ranges('Mr Erdoğan said'), [[3, 10]]);
+});
+
+test('every term is credited, even when a longer one matches the same words', () => {
+  assert.deepEqual(buildMatcher(['Lazarus', 'Lazarus Group']).match('The Lazarus Group strikes'), ['Lazarus', 'Lazarus Group']);
+  assert.deepEqual(buildMatcher(['Russia*', 'Russia']).match('Russia warns'), ['Russia*', 'Russia']);
+  assert.deepEqual(buildMatcher(['Russia', 'Russia*']).match('Russia warns'), ['Russia', 'Russia*']);
+});
+
+test('a huge list is capped instead of breaking the matcher', () => {
+  const terms = Array.from({ length: 40_000 }, (_, i) => `w${i}`);
+  const matcher = buildMatcher(terms);
+  assert.deepEqual(matcher.match('w5 and w199 but not w200'), ['w5', 'w199']);
+  assert.equal(cleanTerms(terms).length, MAX_TERMS);
+  const full = cleanTerms(terms);
+  assert.deepEqual(addTerm(full, 'one more'), { terms: full, added: false });
+});
+
+test('cleanTerms tidies and drops case-only duplicates', () => {
+  assert.deepEqual(cleanTerms(['  Lazarus  ', 'lazarus', 'Russia *', '*', '', 'APT28']), ['Lazarus', 'Russia*', 'APT28']);
 });

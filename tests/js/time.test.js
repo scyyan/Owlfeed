@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { dayKey, dayLabel, momentLabel, parseTime, relativeTime, updatedLabel } from '../../site/js/time.js';
+import { clockTime, dayKey, dayLabel, momentLabel, parseTime, relativeTime, updatedLabel } from '../../site/js/time.js';
 
 const NOW = Date.parse('2026-10-15T14:00:00Z'); // tests run with TZ=UTC
 
@@ -46,4 +46,11 @@ test('momentLabel names the day once a bare clock time would be ambiguous', () =
   assert.equal(momentLabel(NOW - 20 * 3_600_000, NOW, 'en-US'), 'yesterday 6:00 PM');
   assert.equal(momentLabel(NOW - 3 * 86_400_000, NOW, 'en-US'), 'Mon 2:00 PM');
   assert.equal(momentLabel(NOW - 10 * 86_400_000, NOW, 'en-US'), 'Oct 5, 2:00 PM');
+});
+
+test('a time a few minutes ahead (clock skew) still reads as today', () => {
+  const now = Date.UTC(2026, 9, 15, 23, 58);
+  const ahead = now + 5 * 60_000; // 00:03 tomorrow
+  assert.equal(dayLabel(ahead, now).title, 'Today');
+  assert.equal(momentLabel(ahead, now), clockTime(now));
 });
