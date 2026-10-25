@@ -6,6 +6,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Callable, Iterable
+from urllib.parse import urljoin
 
 import requests
 import urllib3
@@ -24,6 +25,8 @@ FETCH_ALL_DEADLINE = 180.0  # seconds for every source together; stragglers are 
 MAX_BYTES = 10 * 1024 * 1024
 RETRY_BACKOFF_SECONDS = 2.0  # wait before retry n is n times this
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+MAX_REDIRECTS = 5
 WORKERS = 8
 
 
@@ -86,12 +89,52 @@ def _describe(exc: Exception) -> str:
     return f"request failed ({type(exc).__name__})"
 
 
+class _ManualRedirectSession(requests.Session):
+    """A session that never resolves redirects itself.
+
+    requests reads (and decompresses) a redirect's whole body while resolving it, even with
+    allow_redirects=False (it still works out Response.next), before our size cap and download
+    deadline apply. With no redirect target it reads nothing; _open follows Location instead.
+    """
+
+    def get_redirect_target(self, resp: requests.Response) -> None:
+        return None
+
+
+def _get(url: str, **kwargs) -> requests.Response:
+    # Same pattern as requests.get: a streamed response keeps its connection after the session closes.
+    with _ManualRedirectSession() as session:
+        return session.get(url, **kwargs)
+
+
+def _open(get: Callable[..., requests.Response], url: str, headers: dict[str, str]) -> tuple[requests.Response | None, str | None]:
+    """GET url, following redirects by hand. Returns (response, None) or (None, error).
+
+    Each redirect is closed unread, and every hop (not just the last) must stay on https, since
+    feeds are https (see config.py).
+    """
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        response = get(current, headers=headers, timeout=TIMEOUT, stream=True, allow_redirects=False)
+        location = (response.headers.get("Location") or "").strip()
+        if response.status_code not in REDIRECT_STATUSES or not location:
+            return response, None
+        response.close()
+        try:
+            current = urljoin(current, location)
+        except ValueError:
+            return None, "invalid redirect"
+        if not current.lower().startswith("https://"):
+            return None, "redirected to a non-https URL"
+    return None, "too many redirects"
+
+
 def fetch(
     url: str,
     etag: str | None = None,
     last_modified: str | None = None,
     *,
-    get: Callable[..., requests.Response] = requests.get,
+    get: Callable[..., requests.Response] = _get,
     sleep: Callable[[float], None] = time.sleep,
     retries: int = 1,
 ) -> FetchResult:
@@ -106,10 +149,10 @@ def fetch(
     for attempt in range(retries + 1):
         retryable_error, last_status = None, None
         try:
-            with get(url, headers=headers, timeout=TIMEOUT, stream=True, allow_redirects=True) as response:
-                # Feeds must be https (see config.py); refuse a redirect that downgrades to http.
-                if response.history and not str(response.url).lower().startswith("https://"):
-                    return FetchResult(error="redirected to a non-https URL")
+            opened, redirect_error = _open(get, url, headers)
+            if redirect_error:
+                return FetchResult(error=redirect_error)
+            with opened as response:
                 status = response.status_code
                 if status == 304:
                     return FetchResult(
