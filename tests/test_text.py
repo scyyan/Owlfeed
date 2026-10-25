@@ -1,4 +1,5 @@
 import time
+import pytest
 from owlfeed.text import clean_title, html_to_text, make_summary, strip_boilerplate, summary_text, truncate
 
 
@@ -455,3 +456,22 @@ def test_long_whitespace_around_line_breaks_stays_fast():
     summary_text("<p>start" + " " * 60_000 + "<br>" + " " * 60_000 + "end of the line</p>")
     summary_text("<p>start" + " " * 60_000 + "end</p>")
     assert time.perf_counter() - started < 1.0
+
+
+@pytest.mark.parametrize(
+    "damaged",
+    [
+        "YARA-X&#;x26;#;39;s 1.22.0 release",  # SANS ISC: the ";" moved to just after "&#"
+        "YARA-X&#x26;#39;s 1.22.0 release",  # the reference's "&" escaped as a reference
+        "YARA-X&amp;#39;s 1.22.0 release",
+    ],
+)
+def test_damaged_and_split_references_are_repaired(damaged):
+    assert summary_text(damaged + " brings 11 improvements and 9 bugfixes.") == (
+        "YARA-X's 1.22.0 release brings 11 improvements and 9 bugfixes."
+    )
+    assert clean_title(damaged, plain=True) == "YARA-X's 1.22.0 release"
+
+
+def test_text_without_damaged_references_is_unchanged():
+    assert summary_text("AT&amp;T and C# 12 ship; use &#;garbage; here.") == "AT&T and C# 12 ship; use &#;garbage; here."

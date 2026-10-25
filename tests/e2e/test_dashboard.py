@@ -2,8 +2,11 @@
 
 import json
 import re
+import shutil
+import subprocess
 from datetime import timedelta
 
+import pytest
 from playwright.sync_api import expect
 
 from .conftest import set_last_visit
@@ -1481,3 +1484,19 @@ def test_the_page_hides_itself_inside_another_sites_frame(page, server):
     expect(frame.locator(".framed-note")).to_be_visible()
     expect(frame.locator(".framed-note a")).to_have_attribute("target", "_blank")
     expect(frame.locator("#feed")).to_be_hidden()
+
+
+@pytest.mark.parametrize("width", [320, 360])
+def test_phone_tab_labels_fit_even_in_a_wide_font(make_page, server, width):
+    # DejaVu Sans (a common Linux fallback for system-ui) is much wider than phone system fonts.
+    if not shutil.which("fc-list") or "DejaVu Sans" not in subprocess.run(
+        ["fc-list", ":", "family"], capture_output=True, text=True
+    ).stdout:
+        pytest.skip("DejaVu Sans is not installed")
+    (server.root / "css" / "wide-font.css").write_text("body, button { font-family: 'DejaVu Sans' !important; }")
+    page = make_page(viewport=(width, 640))
+    open_dashboard(page, server)
+    page.add_style_tag(url=server.url + "css/wide-font.css")  # a same-origin stylesheet, as the CSP allows
+    wait_until(page, "getComputedStyle(document.body).fontFamily.includes('DejaVu')")
+    expect(page.locator("#tabbar .tab-label")).to_have_text(["All", "New", "Unread", "Watchlist", "Filters"])
+    assert page.evaluate("[...document.querySelectorAll('.tab-label')].every(l => l.scrollWidth <= l.parentElement.clientWidth)")
