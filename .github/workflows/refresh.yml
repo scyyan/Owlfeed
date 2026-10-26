@@ -4,7 +4,11 @@ name: Refresh feed
 # currently live, and publishes the dashboard to GitHub Pages.
 on:
   schedule:
-    - cron: "4,19,34,49 * * * *" # every 15 minutes; GitHub may start scheduled runs a few minutes late
+    # GitHub starts scheduled runs late or drops them when it is busy (on 26 Oct 2026 a 15-minute
+    # schedule ran about every 45 minutes). So the workflow wakes every 5 minutes, away from the
+    # busy top of the hour, and the "due" job below skips the work while the live feed is fresh:
+    # feeds are still fetched about every 15 minutes, but a dropped run costs 5 minutes, not 15.
+    - cron: "2-57/5 * * * *"
   push:
     branches: [main]
   workflow_dispatch:
@@ -17,9 +21,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  due:
+    # Scheduled runs refresh only when the live feed is at least 12 minutes old. Pushes and
+    # manual runs always refresh. If the age can't be read, refresh anyway.
+    name: Check if a refresh is due
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: read # configure-pages looks up the site's URL
+    outputs:
+      due: ${{ steps.check.outputs.due }}
+    steps:
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Compare the live feed's age with the refresh interval
+        id: check
+        env:
+          EVENT: ${{ github.event_name }}
+          LIVE_FEED: ${{ steps.pages.outputs.base_url }}/data/feed.json
+          MIN_AGE_SECONDS: "720"
+        run: |
+          due=true
+          if [ "${EVENT}" = "schedule" ]; then
+            # ?due=<run id> gets past the Pages cache, like the build's ?run=.
+            generated=$(curl -fsS --max-time 20 "${LIVE_FEED}?due=${GITHUB_RUN_ID}" | jq -r '.generated_at // empty' 2>/dev/null) || generated=""
+            built=$(date -u -d "${generated}" +%s 2>/dev/null) || built=""
+            if [ -n "${generated}" ] && [ -n "${built}" ]; then
+              age=$(( $(date -u +%s) - built ))
+              echo "The live feed was built ${age} s ago (${generated})."
+              if [ "${age}" -lt "${MIN_AGE_SECONDS}" ]; then due=false; fi
+            else
+              echo "Couldn't read the live feed's age; refreshing anyway."
+            fi
+          fi
+          echo "Refresh due: ${due}"
+          echo "due=${due}" >> "${GITHUB_OUTPUT}"
+
   build:
     # Runs the fetcher (third-party feeds and packages) with read-only permissions.
     name: Fetch feeds
+    needs: due
+    if: needs.due.outputs.due == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -42,23 +85,27 @@ jobs:
       - name: Restore the saved copy of the feed
         # Only used if the live feed.json answers 404 (e.g. a Pages hiccup), so history survives.
         # It comes from this workflow's own last successful scheduled or push run on main: those
-        # always run main's own code (a manual run can be started from any ref). Best effort: if
-        # the lookup fails, the run carries on without it.
+        # always run main's own code (a manual run can be started from any ref). Runs that skipped
+        # the refresh (feed still fresh) saved nothing, so the newest run that has a copy is used.
+        # Best effort: if the lookup fails, the run carries on without it.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow refresh.yml --branch main \
-            --status success --limit 20 --json databaseId,event \
-            --jq '[.[] | select(.event == "schedule" or .event == "push")][0].databaseId // empty') \
-            || { echo "::warning::Could not look up the last refresh; continuing without a saved feed"; run_id=""; }
-          if [ -n "${run_id}" ]; then
-            if ! gh run download "${run_id}" --repo "$GITHUB_REPOSITORY" --name feed-state --dir .state; then
-              rm -rf .state  # never use a partial download
-              echo "Run ${run_id} has no saved feed; continuing without one"
+          run_ids=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow refresh.yml --branch main \
+            --status success --limit 60 --json databaseId,event \
+            --jq '.[] | select(.event == "schedule" or .event == "push") | .databaseId') \
+            || { echo "::warning::Could not look up earlier refreshes; continuing without a saved feed"; run_ids=""; }
+          tried=0
+          for run_id in ${run_ids}; do
+            [ "${tried}" -ge 15 ] && break
+            tried=$((tried + 1))
+            if gh run download "${run_id}" --repo "$GITHUB_REPOSITORY" --name feed-state --dir .state 2>/dev/null; then
+              echo "Saved feed restored from run ${run_id}"
+              break
             fi
-          else
-            echo "No earlier successful refresh; continuing without a saved feed"
-          fi
+            rm -rf .state  # never use a partial download
+          done
+          [ -f .state/feed.json ] || echo "No saved feed found; continuing without one"
       - name: Fetch feeds
         # The live feed.json is this run's memory of earlier items. If it cannot be read
         # (anything other than "not found"), the build stops and the current dashboard stays

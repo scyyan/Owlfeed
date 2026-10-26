@@ -43,8 +43,10 @@ sources.yml ─► GitHub Action (every 15 min) ─► data/feed.json ─► Git
                        └──────── previous feed.json from the live site ─┘
 ```
 
-1. A scheduled GitHub Action ([`refresh.yml`](.github/workflows/refresh.yml)) runs every
-   15 minutes. It downloads every feed in [`sources.yml`](sources.yml) and tidies titles,
+1. A scheduled GitHub Action ([`refresh.yml`](.github/workflows/refresh.yml)) refreshes the
+   feed about every 15 minutes. (It wakes every 5 minutes and skips while the live feed is
+   under 12 minutes old, because GitHub often starts scheduled runs late or drops them.) It
+   downloads every feed in [`sources.yml`](sources.yml) and tidies titles,
    links and summaries. Then it merges them with the feed that is already live and drops
    anything older than 7 days.
 2. It publishes the result, a static page plus `data/feed.json`, to GitHub Pages. Just before
@@ -132,6 +134,10 @@ keeps its last data. The CI run for that push shows exactly what's wrong.
   *Actions* tab and check *Refresh feed*. GitHub pauses schedules in public repositories
   after 60 days without activity. The *Keepalive* workflow re-enables them weekly to
   prevent that. If the refresh still shows as disabled, click **Enable workflow**.
+- **"Updated 40 minutes ago" now and then.** GitHub starts scheduled runs late, or skips them,
+  when it is busy. Runs that skipped because the feed was fresh show their *Fetch feeds* job
+  as skipped; that is normal. To refresh at once, run *Refresh feed* by hand
+  (*Actions → Refresh feed → Run workflow*).
 - **A source has an orange dot.** Hover over it to see the error. Sites sometimes move their
   feeds or block automated requests. Find the new feed URL, update `sources.yml`, and
   confirm it in the CI *Feed check* summary.
