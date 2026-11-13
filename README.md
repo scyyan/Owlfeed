@@ -45,7 +45,8 @@ sources.yml ─► GitHub Action (every 15 min) ─► data/feed.json ─► Git
 
 1. A scheduled GitHub Action ([`refresh.yml`](.github/workflows/refresh.yml)) refreshes the
    feed about every 15 minutes. (It wakes every 5 minutes and skips while the live feed is
-   under 12 minutes old, because GitHub often starts scheduled runs late or drops them.) It
+   under 12 minutes old, because GitHub often starts scheduled runs late or drops them. For
+   refreshes on time, an outside timer can start it instead; see step 4 of the one-time setup.) It
    downloads every feed in [`sources.yml`](sources.yml) and tidies titles,
    links and summaries. Then it merges them with the feed that is already live and drops
    anything older than 7 days.
@@ -74,6 +75,31 @@ GitHub Pages is free for public repositories, so:
 2. **Turn on Pages:** *Settings → Pages → Build and deployment → Source:* **GitHub Actions**.
 3. **Merge this work into `main`.** The push to `main` starts the first refresh. After about a
    minute the dashboard is live at https://scyyan.github.io/Owlfeed/.
+4. **Optional but recommended: start refreshes on time from outside GitHub.** GitHub treats
+   scheduled runs as best effort. On some days it started the 5-minute schedule only every
+   hour, and on 13 Nov 2026 only three times in 24 hours. A manual start ("Run workflow")
+   always runs at once, and any outside timer can make one through GitHub's API:
+   1. **Create a token:** *Settings → Developer settings → Personal access tokens →
+      Fine-grained tokens → Generate new token*. Under *Repository access* choose **Only
+      select repositories → scyyan/Owlfeed**. Under *Permissions → Repository permissions*
+      set **Actions** to **Read and write** and leave everything else at *No access*. Pick an
+      expiry and put a reminder in your calendar to renew it.
+   2. **Create the timer** with a free scheduler such as [cron-job.org](https://cron-job.org)
+      (any service that can send an HTTP request on a schedule works). Set it to run every
+      15 minutes and send:
+      - **Method:** `POST`
+      - **URL:** `https://api.github.com/repos/scyyan/Owlfeed/actions/workflows/refresh.yml/dispatches`
+      - **Headers:** `Authorization: Bearer <your token>`, `Accept: application/vnd.github+json`
+        and `X-GitHub-Api-Version: 2022-11-28`
+      - **Body:** `{"ref":"main"}`
+   3. **Check it:** run the job once from the scheduler. GitHub answers `204 No Content`, and a
+      *Refresh feed* run started by *workflow_dispatch* appears in the *Actions* tab. A `401`
+      means the token is wrong or expired; a `403` or `404` usually means it lacks the
+      *Actions: Read and write* permission or the repository.
+
+   The token stays with the scheduler; never put it in the repository. Keep the GitHub schedule
+   too: it is the backup if the timer stops, and its freshness check skips runs while the feed
+   is under 12 minutes old, so the two never double up.
 
 To refresh by hand at any time: *Actions → Refresh feed → Run workflow*.
 
@@ -130,14 +156,22 @@ keeps its last data. The CI run for that push shows exactly what's wrong.
 
 ## Troubleshooting
 
-- **"Updated 3 hours ago" in orange.** The scheduled refresh isn't running. Open the
-  *Actions* tab and check *Refresh feed*. GitHub pauses schedules in public repositories
-  after 60 days without activity. The *Keepalive* workflow re-enables them weekly to
-  prevent that. If the refresh still shows as disabled, click **Enable workflow**.
-- **"Updated 40 minutes ago" now and then.** GitHub starts scheduled runs late, or skips them,
-  when it is busy. Runs that skipped because the feed was fresh show their *Fetch feeds* job
-  as skipped; that is normal. To refresh at once, run *Refresh feed* by hand
-  (*Actions → Refresh feed → Run workflow*).
+- **"Updated 3 hours ago" in orange.** Refreshes aren't starting. Open the *Actions* tab and
+  check *Refresh feed*:
+  - **Recent runs succeeded but hours apart:** GitHub is dropping scheduled runs. Set up the
+    outside timer (step 4 of the one-time setup). If you already have, check the scheduler's
+    history for failed requests and whether the token has expired.
+  - **The workflow shows as disabled:** GitHub pauses schedules in public repositories after
+    60 days without activity. The *Keepalive* workflow re-enables them weekly to prevent that;
+    if it is still disabled, click **Enable workflow**.
+  - **Recent runs failed:** open the failed run to see which step broke.
+- **"Updated 40 minutes ago" now and then.** Without the outside timer, GitHub starts
+  scheduled runs late or skips them when it is busy. Runs that skipped because the feed was
+  fresh show their *Fetch feeds* job as skipped; that is normal. To refresh at once, run
+  *Refresh feed* by hand (*Actions → Refresh feed → Run workflow*).
+- **Still old right after a refresh finished.** GitHub Pages lets its servers keep a copy of
+  each file for up to 10 minutes, and an open dashboard checks for new data every 5 minutes.
+  Wait a few minutes, or press **Check now** in the feed status panel.
 - **A source has an orange dot.** Hover over it to see the error. Sites sometimes move their
   feeds or block automated requests. Find the new feed URL, update `sources.yml`, and
   confirm it in the CI *Feed check* summary.
